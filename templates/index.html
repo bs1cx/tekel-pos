@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tekel POS - Profesyonel Satış Sistemi</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Login Modal -->
+    <div id="loginModal" class="modal" style="display: block;">
+        <div class="modal-content">
+            <div class="login-container">
+                <div class="login-header">
+                    <i class="fas fa-store"></i>
+                    <h2>Tekel POS Sistemi</h2>
+                    <p>Lütfen giriş yapın</p>
+                </div>
+                <form id="loginForm" class="login-form">
+                    <div class="form-group">
+                        <label>Kullanıcı Adı:</label>
+                        <input type="text" id="username" value="admin" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Şifre:</label>
+                        <input type="password" id="password" value="admin123" required>
+                    </div>
+                    <button type="submit" class="btn-primary btn-large">
+                        <i class="fas fa-sign-in-alt"></i> Giriş Yap
+                    </button>
+                </form>
+                <div class="login-info">
+                    <p><strong>Varsayılan Giriş:</strong><br>Kullanıcı: admin | Şifre: admin123</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container" style="display: none;">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <i class="fas fa-store"></i>
+                <span>Tekel POS</span>
+            </div>
+            <div class="user-info">
+                <i class="fas fa-user-circle"></i>
+                <div class="user-details">
+                    <span id="currentUser">Kullanıcı</span>
+                    <span class="user-role" id="currentRole">Yetki</span>
+                </div>
+            </div>
+            <ul class="nav-links">
+                <li class="nav-item active" data-tab="dashboard">
+                    <a href="#">
+                        <i class="fas fa-tachometer-alt"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="sales">
+                    <a href="#">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span>Satış Yap</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="products">
+                    <a href="#">
+                        <i class="fas fa-boxes"></i>
+                        <span>Ürünler</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="inventory">
+                    <a href="#">
+                        <i class="fas fa-warehouse"></i>
+                        <span>Stok Yönetimi</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="mobile-stock">
+                    <a href="#">
+                        <i class="fas fa-mobile-alt"></i>
+                        <span>Mobil Stok Ekle</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="reports">
+                    <a href="#">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Raporlar</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-tab="cash">
+                    <a href="#">
+                        <i class="fas fa-cash-register"></i>
+                        <span>Kasa</span>
+                    </a>
+                </li>
+                <li class="nav-item admin-only" data-tab="admin">
+                    <a href="#">
+                        <i class="fas fa-cog"></i>
+                        <span>Yönetim</span>
+                    </a>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <button class="btn-logout" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> Çıkış Yap
+                </button>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-left">
+                    <h1>Tekel POS Sistemi</h1>
+                    <div class="breadcrumb" id="breadcrumb">Dashboard</div>
+                </div>
+                <div class="header-right">
+                    <div class="connection-info">
+                        <div class="ip-display">
+                            <i class="fas fa-wifi"></i>
+                            <span>IP: {{ local_ip }}</span>
+                        </div>
+                        <div class="qr-display">
+                            <img src="{{ qr_code }}" alt="QR Code">
+                            <div class="qr-tooltip">
+                                <p>Sisteme bağlanmak için QR kodu tarayın</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Tab Content -->
+            <div class="content-area">
+                <!-- Dashboard Tab -->
+                <div id="dashboard" class="tab-content active">
+                    <div class="dashboard-header">
+                        <h2><i class="fas fa-tachometer-alt"></i> Dashboard</h2>
+                        <div class="dashboard-actions">
+                            <button class="btn-primary" onclick="refreshDashboard()">
+                                <i class="fas fa-sync-alt"></i> Yenile
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card primary">
+                            <div class="stat-icon">
+                                <i class="fas fa-shopping-cart"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Bugünkü Satış</h3>
+                                <div class="stat-number" id="todaySales">0 TL</div>
+                            </div>
+                        </div>
+                        <div class="stat-card success">
+                            <div class="stat-icon">
+                                <i class="fas fa-boxes"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Toplam Ürün</h3>
+                                <div class="stat-number" id="totalProducts">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-icon">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Azalan Stok</h3>
+                                <div class="stat-number" id="lowStockCount">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card danger">
+                            <div class="stat-icon">
+                                <i class="fas fa-times-circle"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Stokta Yok</h3>
+                                <div class="stat-number" id="outOfStockCount">0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-content">
+                        <div class="recent-activity">
+                            <h3>Son Satışlar</h3>
+                            <div class="activity-list" id="recentSales">
+                                <div class="empty-state">
+                                    <i class="fas fa-receipt"></i>
+                                    <p>Henüz satış yapılmadı</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="stock-alerts-widget">
+                            <h3>Stok Uyarıları</h3>
+                            <div class="alerts-list" id="stockAlerts">
+                                <div class="empty-state">
+                                    <i class="fas fa-check-circle"></i>
+                                    <p>Stok uyarısı yok</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sales Tab -->
+                <div id="sales" class="tab-content">
+                    <div class="sales-container">
+                        <div class="sales-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-barcode"></i> Hızlı Ürün Ekle</h3>
+                            </div>
+                            <div class="barcode-section">
+                                <div class="barcode-input-group">
+                                    <input type="text" id="barcodeInput" placeholder="Barkodu yazın veya tarayıcıdan okutun..." autofocus>
+                                    <button class="btn-primary" onclick="addProductByBarcode()">
+                                        <i class="fas fa-plus"></i> Ekle
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div class="products-section">
+                                <h4>Ürün Listesi</h4>
+                                <div class="search-box">
+                                    <i class="fas fa-search"></i>
+                                    <input type="text" id="productSearch" placeholder="Ürün ara...">
+                                </div>
+                                <div class="products-grid" id="productGrid">
+                                    <div class="empty-state">
+                                        <i class="fas fa-box-open"></i>
+                                        <p>Ürün bulunamadı</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="cart-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-shopping-cart"></i> Satış Sepeti</h3>
+                                <span class="cart-badge" id="cartCount">0</span>
+                            </div>
+                            
+                            <div class="cart-items" id="cartItems">
+                                <div class="empty-state">
+                                    <i class="fas fa-shopping-cart"></i>
+                                    <p>Sepet boş</p>
+                                    <small>Ürün eklemek için barkod okutun veya listeden seçin</small>
+                                </div>
+                            </div>
+
+                            <div class="payment-section">
+                                <h4>Ödeme Yöntemi</h4>
+                                <div class="payment-options">
+                                    <label class="payment-option">
+                                        <input type="radio" name="paymentMethod" value="nakit" checked>
+                                        <span class="radio-custom"></span>
+                                        <span>Nakit</span>
+                                    </label>
+                                    <label class="payment-option">
+                                        <input type="radio" name="paymentMethod" value="kredi">
+                                        <span class="radio-custom"></span>
+                                        <span>Kredi Kartı</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="cash-input" id="cashInputSection">
+                                    <label>Verilen Para:</label>
+                                    <input type="number" id="cashAmount" placeholder="0.00" step="0.01">
+                                    <div class="change-display" id="changeDisplay">
+                                        Para Üstü: <span>0.00 TL</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="cart-summary">
+                                <div class="summary-row">
+                                    <span>Ara Toplam:</span>
+                                    <span id="subtotal">0.00 TL</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>KDV (%18):</span>
+                                    <span id="kdvAmount">0.00 TL</span>
+                                </div>
+                                <div class="summary-row total">
+                                    <span>GENEL TOPLAM:</span>
+                                    <span id="totalAmount">0.00 TL</span>
+                                </div>
+                                <button class="btn-success btn-large" onclick="completeSale()">
+                                    <i class="fas fa-credit-card"></i> Satışı Tamamla
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Products Tab -->
+                <div id="products" class="tab-content">
+                    <div class="products-header">
+                        <h2><i class="fas fa-boxes"></i> Ürün Yönetimi</h2>
+                        <div class="header-actions">
+                            <div class="search-box">
+                                <i class="fas fa-search"></i>
+                                <input type="text" id="productsSearch" placeholder="Ürün ara...">
+                            </div>
+                            <button class="btn-primary" onclick="loadProducts()">
+                                <i class="fas fa-sync-alt"></i> Yenile
+                            </button>
+                            <button class="btn-success" onclick="openAddProductModal()">
+                                <i class="fas fa-plus"></i> Yeni Ürün
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="products-table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Barkod</th>
+                                    <th>Ürün Adı</th>
+                                    <th>Fiyat</th>
+                                    <th>Stok</th>
+                                    <th>KDV</th>
+                                    <th>Durum</th>
+                                    <th>İşlemler</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productsTableBody">
+                                <tr>
+                                    <td colspan="7" class="empty-state">
+                                        <i class="fas fa-box-open"></i>
+                                        <p>Henüz ürün eklenmemiş</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Inventory Tab -->
+                <div id="inventory" class="tab-content">
+                    <div class="inventory-header">
+                        <h2><i class="fas fa-warehouse"></i> Stok Yönetimi</h2>
+                        <div class="inventory-stats">
+                            <div class="stat-badge total">
+                                <span class="stat-label">Toplam Ürün</span>
+                                <span class="stat-value" id="statTotalProducts">0</span>
+                            </div>
+                            <div class="stat-badge in-stock">
+                                <span class="stat-label">Stokta Var</span>
+                                <span class="stat-value" id="statInStock">0</span>
+                            </div>
+                            <div class="stat-badge low-stock">
+                                <span class="stat-label">Az Stok</span>
+                                <span class="stat-value" id="statLowStock">0</span>
+                            </div>
+                            <div class="stat-badge out-of-stock">
+                                <span class="stat-label">Stokta Yok</span>
+                                <span class="stat-value" id="statOutOfStock">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="inventory-controls">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="inventorySearch" placeholder="Stok ara...">
+                        </div>
+                        <button class="btn-primary" onclick="loadInventory()">
+                            <i class="fas fa-sync-alt"></i> Yenile
+                        </button>
+                    </div>
+
+                    <div class="inventory-table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Barkod</th>
+                                    <th>Ürün Adı</th>
+                                    <th>Fiyat</th>
+                                    <th>Mevcut Stok</th>
+                                    <th>Min. Stok</th>
+                                    <th>Durum</th>
+                                    <th>Hızlı İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryTableBody">
+                                <tr>
+                                    <td colspan="7" class="empty-state">
+                                        <i class="fas fa-warehouse"></i>
+                                        <p>Stok bilgisi bulunamadı</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Mobil Stok Ekleme Sekmesi -->
+                <div id="mobile-stock" class="tab-content">
+                    <div class="mobile-stock-header">
+                        <h2><i class="fas fa-mobile-alt"></i> Mobil Stok Ekleme</h2>
+                        <p>Telefonunuzdan barkod tarayarak hızlı stok ekleyin</p>
+                    </div>
+
+                    <div class="mobile-stock-container">
+                        <div class="camera-section">
+                            <h3><i class="fas fa-camera"></i> Barkod Tarama</h3>
+                            <div class="camera-actions">
+                                <button class="btn-primary btn-large" id="startCameraBtn">
+                                    <i class="fas fa-camera"></i> Kamerayı Aç
+                                </button>
+                                <button class="btn-secondary" id="stopCameraBtn" style="display: none;">
+                                    <i class="fas fa-stop"></i> Durdur
+                                </button>
+                            </div>
+                            
+                            <div class="camera-preview" id="cameraPreview" style="display: none;">
+                                <video id="videoElement" width="100%" autoplay playsinline></video>
+                                <canvas id="canvasElement" style="display: none;"></canvas>
+                            </div>
+                            
+                            <div class="scan-result" id="scanResult">
+                                <div class="empty-state">
+                                    <i class="fas fa-barcode"></i>
+                                    <p>Kamerayı açıp barkod tarayın</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="quick-stock-section">
+                            <h3><i class="fas fa-bolt"></i> Hızlı Stok Ekleme</h3>
+                            
+                            <div class="quick-stock-form">
+                                <div class="form-group">
+                                    <label>Barkod:</label>
+                                    <input type="text" id="quickBarcodeInput" placeholder="Barkodu yazın...">
+                                </div>
+                                <div class="form-group">
+                                    <label>Eklenecek Adet:</label>
+                                    <input type="number" id="quickStockQuantity" value="1" min="1">
+                                </div>
+                                <button class="btn-success" onclick="quickStockAdd()">
+                                    <i class="fas fa-plus"></i> Stok Ekle
+                                </button>
+                            </div>
+
+                            <div class="manual-product-form" id="manualProductForm" style="display: none;">
+                                <h4><i class="fas fa-plus-circle"></i> Yeni Ürün Ekle</h4>
+                                <form onsubmit="addNewProductFromMobile(event)">
+                                    <input type="hidden" id="scannedBarcodeMobile">
+                                    <div class="form-group">
+                                        <label>Barkod:</label>
+                                        <input type="text" id="barcodeFieldMobile" readonly>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Ürün Adı:</label>
+                                        <input type="text" id="productNameMobile" required placeholder="Ürün adını yazın">
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Başlangıç Stoku:</label>
+                                            <input type="number" id="productQuantityMobile" value="1" min="1" required>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Fiyat (TL):</label>
+                                            <input type="number" id="productPriceMobile" step="0.01" required placeholder="0.00">
+                                        </div>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>ÖTV (%):</label>
+                                            <input type="number" id="productOTVMobile" step="0.01" value="0">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>KDV (%):</label>
+                                            <input type="number" id="productKDVMobile" step="0.01" value="18">
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn-success btn-large">
+                                        <i class="fas fa-check"></i> Ürünü Kaydet
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reports Tab -->
+                <div id="reports" class="tab-content">
+                    <div class="reports-header">
+                        <h2><i class="fas fa-chart-bar"></i> Satış Raporları</h2>
+                        <div class="header-actions">
+                            <div class="date-filter">
+                                <input type="date" id="startDate">
+                                <span>-</span>
+                                <input type="date" id="endDate">
+                                <button class="btn-primary" onclick="loadSalesReport()">
+                                    <i class="fas fa-filter"></i> Filtrele
+                                </button>
+                            </div>
+                            <button class="btn-primary" onclick="loadReports()">
+                                <i class="fas fa-sync-alt"></i> Yenile
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="reports-grid">
+                        <div class="report-card">
+                            <h3>Günlük Özet</h3>
+                            <div class="daily-stats" id="dailyStats">
+                                <div class="empty-state">
+                                    <i class="fas fa-chart-line"></i>
+                                    <p>Tarih seçin</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="report-card">
+                            <h3>En Çok Satanlar</h3>
+                            <div class="top-products" id="topProducts">
+                                <div class="empty-state">
+                                    <i class="fas fa-trophy"></i>
+                                    <p>Veri yükleniyor...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sales-report-section">
+                        <h3>Detaylı Satış Raporu</h3>
+                        <div class="sales-report-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Fiş No</th>
+                                        <th>Tarih</th>
+                                        <th>Kasiyer</th>
+                                        <th>Toplam</th>
+                                        <th>Ödeme</th>
+                                        <th>İşlem</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="salesReportBody">
+                                    <tr>
+                                        <td colspan="6" class="empty-state">
+                                            <i class="fas fa-receipt"></i>
+                                            <p>Tarih aralığı seçin</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="stock-report-section">
+                        <h3>Stok Hareketleri</h3>
+                        <div class="stock-report-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Barkod</th>
+                                        <th>Ürün Adı</th>
+                                        <th>Tarih</th>
+                                        <th>Hareket</th>
+                                        <th>Miktar</th>
+                                        <th>Kullanıcı</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stockReportBody">
+                                    <tr>
+                                        <td colspan="6" class="empty-state">
+                                            <i class="fas fa-exchange-alt"></i>
+                                            <p>Stok hareketi bulunamadı</p>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cash Management Tab -->
+                <div id="cash" class="tab-content">
+                    <div class="cash-header">
+                        <h2><i class="fas fa-cash-register"></i> Kasa Yönetimi</h2>
+                        <div class="cash-status-display">
+                            <span class="status-badge" id="cashStatusBadge">Kapalı</span>
+                            <span class="current-amount" id="currentCashAmount">0.00 TL</span>
+                        </div>
+                        <div class="cash-actions">
+                            <button class="btn-success" id="openCashBtn" onclick="openCashRegisterModal()">
+                                <i class="fas fa-lock-open"></i> Kasa Aç
+                            </button>
+                            <button class="btn-danger" id="closeCashBtn" onclick="closeCashRegisterModal()" style="display: none;">
+                                <i class="fas fa-lock"></i> Kasa Kapat
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="cash-status-container">
+                        <div class="cash-status-card">
+                            <div class="status-header">
+                                <h3>Kasa Durumu</h3>
+                                <div class="status-indicator">
+                                    <i class="fas fa-lock"></i>
+                                    <span id="cashStatusText">Kapalı</span>
+                                </div>
+                            </div>
+                            <div class="cash-details">
+                                <div class="detail-item">
+                                    <span>Açılış Bakiyesi:</span>
+                                    <span id="openingBalance">0.00 TL</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Toplam Satış:</span>
+                                    <span id="totalSalesAmount">0.00 TL</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Nakit Satış:</span>
+                                    <span id="cashSalesAmount">0.00 TL</span>
+                                </div>
+                                <div class="detail-item">
+                                    <span>Kartlı Satış:</span>
+                                    <span id="cardSalesAmount">0.00 TL</span>
+                                </div>
+                                <div class="detail-item total">
+                                    <span>Beklenen Nakit:</span>
+                                    <span id="expectedCash">0.00 TL</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="cash-transactions-section">
+                            <h3>Kasa Hareketleri</h3>
+                            <div class="transactions-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Kullanıcı</th>
+                                            <th>İşlem</th>
+                                            <th>Tutar</th>
+                                            <th>Açıklama</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="cashTransactionsBody">
+                                        <tr>
+                                            <td colspan="5" class="empty-state">
+                                                <i class="fas fa-exchange-alt"></i>
+                                                <p>Henüz kasa hareketi yok</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Tab -->
+                <div id="admin" class="tab-content">
+                    <div class="admin-header">
+                        <h2><i class="fas fa-cog"></i> Sistem Yönetimi</h2>
+                        <div class="system-stats">
+                            <div class="stat-badge">
+                                <span class="stat-label">Toplam Kullanıcı</span>
+                                <span class="stat-value" id="totalUsers">0</span>
+                            </div>
+                            <div class="stat-badge">
+                                <span class="stat-label">Toplam Satış</span>
+                                <span class="stat-value" id="totalSales">0</span>
+                            </div>
+                            <div class="stat-badge">
+                                <span class="stat-label">Toplam Ciro</span>
+                                <span class="stat-value" id="totalRevenue">0 TL</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="admin-tabs">
+                        <button class="admin-tab-btn active" data-admin-tab="users" onclick="openAdminTab('users')">Kullanıcılar</button>
+                        <button class="admin-tab-btn" data-admin-tab="audit" onclick="openAdminTab('audit')">Denetim Kayıtları</button>
+                        <button class="admin-tab-btn" data-admin-tab="backup" onclick="openAdminTab('backup')">Yedekleme</button>
+                    </div>
+
+                    <div class="admin-content">
+                        <!-- Users Management -->
+                        <div id="admin-users" class="admin-tab-content active">
+                            <div class="section-header">
+                                <h3>Kullanıcı Yönetimi</h3>
+                                <button class="btn-success" onclick="openAddUserModal()">
+                                    <i class="fas fa-user-plus"></i> Yeni Kullanıcı
+                                </button>
+                            </div>
+                            <div class="users-table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Kullanıcı Adı</th>
+                                            <th>Ad Soyad</th>
+                                            <th>Rol</th>
+                                            <th>Son Giriş</th>
+                                            <th>İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="usersTableBody">
+                                        <tr>
+                                            <td colspan="5" class="empty-state">
+                                                <i class="fas fa-users"></i>
+                                                <p>Kullanıcı yükleniyor...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Audit Logs -->
+                        <div id="admin-audit" class="admin-tab-content">
+                            <div class="section-header">
+                                <h3>Denetim Kayıtları</h3>
+                                <button class="btn-primary" onclick="refreshAuditLogs()">
+                                    <i class="fas fa-sync-alt"></i> Yenile
+                                </button>
+                            </div>
+                            <div class="audit-table-container">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tarih</th>
+                                            <th>Kullanıcı</th>
+                                            <th>İşlem</th>
+                                            <th>Açıklama</th>
+                                            <th>IP Adresi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="auditLogsBody">
+                                        <tr>
+                                            <td colspan="5" class="empty-state">
+                                                <i class="fas fa-clipboard-list"></i>
+                                                <p>Denetim kaydı bulunamadı</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Backup -->
+                        <div id="admin-backup" class="admin-tab-content">
+                            <div class="section-header">
+                                <h3>Veri Yedekleme</h3>
+                                <button class="btn-success" onclick="createBackup()">
+                                    <i class="fas fa-download"></i> Yedek Al
+                                </button>
+                            </div>
+                            <div class="backup-info" id="backupInfo">
+                                <div class="info-card">
+                                    <h4>Yedekleme Bilgileri</h4>
+                                    <p>Sistem otomatik olarak düzenli yedekleme yapar. Manuel yedek oluşturmak için yukarıdaki butonu kullanın.</p>
+                                    
+                                    <div class="backup-stats">
+                                        <div class="backup-stat">
+                                            <span>Son Yedek:</span>
+                                            <span id="lastBackup">-</span>
+                                        </div>
+                                        <div class="backup-stat">
+                                            <span>Toplam Ürün:</span>
+                                            <span id="backupProductCount">0</span>
+                                        </div>
+                                        <div class="backup-stat">
+                                            <span>Toplam Kullanıcı:</span>
+                                            <span id="backupUserCount">0</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="cashOpenModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-lock-open"></i> Kasa Aç</h3>
+                <span class="close" onclick="closeModal('cashOpenModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Açılış Bakiyesi (TL):</label>
+                    <input type="number" id="openingBalanceInput" value="0.00" step="0.01" min="0" autofocus>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('cashOpenModal')">İptal</button>
+                <button class="btn-success" onclick="openCash()">Kasayı Aç</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="cashCloseModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-lock"></i> Kasa Kapat</h3>
+                <span class="close" onclick="closeModal('cashCloseModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="cash-summary">
+                    <div class="summary-item">
+                        <span>Açılış Bakiyesi:</span>
+                        <span id="modalOpeningBalance">0.00 TL</span>
+                    </div>
+                    <div class="summary-item">
+                        <span>Toplam Nakit Satış:</span>
+                        <span id="modalCashSales">0.00 TL</span>
+                    </div>
+                    <div class="summary-item total">
+                        <span>Beklenen Nakit:</span>
+                        <span id="modalExpectedCash">0.00 TL</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Gerçek Nakit Miktarı (TL):</label>
+                    <input type="number" id="closingBalanceInput" step="0.01" min="0">
+                </div>
+                <div class="difference-info">
+                    <span>Fark: </span>
+                    <span id="differenceAmount">0.00 TL</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('cashCloseModal')">İptal</button>
+                <button class="btn-danger" onclick="closeCash()">Kasayı Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Product Modal -->
+    <div id="addProductModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> Yeni Ürün Ekle</h3>
+                <span class="close" onclick="closeModal('addProductModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form onsubmit="addNewProduct(event)">
+                    <div class="form-group">
+                        <label>Barkod:</label>
+                        <input type="text" id="newProductBarcode" required placeholder="Barkod numarası">
+                    </div>
+                    <div class="form-group">
+                        <label>Ürün Adı:</label>
+                        <input type="text" id="newProductName" required placeholder="Ürün adı">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Başlangıç Stoku:</label>
+                            <input type="number" id="newProductQuantity" value="1" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Fiyat (TL):</label>
+                            <input type="number" id="newProductPrice" step="0.01" required placeholder="0.00">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>ÖTV (%):</label>
+                            <input type="number" id="newProductOTV" step="0.01" value="0">
+                        </div>
+                        <div class="form-group">
+                            <label>KDV (%):</label>
+                            <input type="number" id="newProductKDV" step="0.01" value="18">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Min. Stok Seviyesi:</label>
+                        <input type="number" id="newProductMinStock" value="5" min="1">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('addProductModal')">İptal</button>
+                <button class="btn-success" onclick="addNewProduct()">Ürünü Kaydet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add User Modal -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-user-plus"></i> Yeni Kullanıcı Ekle</h3>
+                <span class="close" onclick="closeModal('addUserModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form onsubmit="createNewUser(event)">
+                    <div class="form-group">
+                        <label>Kullanıcı Adı:</label>
+                        <input type="text" id="newUsername" required placeholder="Kullanıcı adı">
+                    </div>
+                    <div class="form-group">
+                        <label>Şifre:</label>
+                        <input type="password" id="newPassword" required placeholder="Şifre">
+                    </div>
+                    <div class="form-group">
+                        <label>Şifre Tekrar:</label>
+                        <input type="password" id="newPasswordConfirm" required placeholder="Şifre tekrar">
+                    </div>
+                    <div class="form-group">
+                        <label>Ad Soyad:</label>
+                        <input type="text" id="newFullName" required placeholder="Ad soyad">
+                    </div>
+                    <div class="form-group">
+                        <label>Rol:</label>
+                        <select id="newUserRole" required>
+                            <option value="admin">Yönetici</option>
+                            <option value="user" selected>Personel</option>
+                            <option value="cashier">Kasiyer</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('addUserModal')">İptal</button>
+                <button class="btn-success" onclick="createNewUser()">Kullanıcıyı Kaydet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Receipt Modal -->
+    <div id="receiptModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-receipt"></i> Fiş Görüntüleme</h3>
+                <span class="close" onclick="closeModal('receiptModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="receiptContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="printReceipt()">
+                    <i class="fas fa-print"></i> Yazdır
+                </button>
+                <button class="btn-secondary" onclick="closeModal('receiptModal')">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Messages -->
+    <div id="statusMessage" class="status-message" style="display: none;"></div>
+
+    <!-- Scripts -->
+    <script src="/static/js/debug.js"></script>
+    <script src="/static/js/jsQR.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
