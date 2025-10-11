@@ -7,7 +7,8 @@ import base64
 import socket
 from datetime import datetime, timedelta
 import json
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from threading import Lock
 import time
 
@@ -18,20 +19,21 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = 'tekel-pos-secret-key-2024'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Veritabanı bağlantısı
+# PostgreSQL veritabanı bağlantısı
 def get_db_connection():
-    conn = sqlite3.connect('database.db', check_same_thread=False)
-    conn.row_factory = sqlite3.Row
+    database_url = os.environ.get('DATABASE_URL')
+    conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
     return conn
 
 # Veritabanı başlatma
 def init_db():
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Kullanıcılar tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             full_name TEXT NOT NULL,
@@ -42,9 +44,9 @@ def init_db():
     ''')
     
     # Ürünler tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             barcode TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             price REAL NOT NULL,
@@ -57,9 +59,9 @@ def init_db():
     ''')
     
     # Satışlar tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS sales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             total_amount REAL NOT NULL,
             payment_method TEXT NOT NULL,
             cash_amount REAL DEFAULT 0,
@@ -72,9 +74,9 @@ def init_db():
     ''')
     
     # Satış detayları tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS sale_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             sale_id INTEGER,
             barcode TEXT NOT NULL,
             product_name TEXT NOT NULL,
@@ -85,9 +87,9 @@ def init_db():
     ''')
     
     # Stok hareketleri tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS stock_movements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             barcode TEXT NOT NULL,
             product_name TEXT NOT NULL,
             movement_type TEXT NOT NULL,
@@ -99,9 +101,9 @@ def init_db():
     ''')
     
     # Kasa durumu tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS cash_register (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             is_open BOOLEAN DEFAULT FALSE,
             current_amount REAL DEFAULT 0,
             opening_balance REAL DEFAULT 0,
@@ -112,9 +114,9 @@ def init_db():
     ''')
     
     # Kasa hareketleri tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS cash_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             transaction_type TEXT NOT NULL,
             amount REAL NOT NULL,
             user_id INTEGER,
@@ -125,9 +127,9 @@ def init_db():
     ''')
     
     # Denetim kayıtları tablosu
-    conn.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             user_id INTEGER,
             action TEXT NOT NULL,
             description TEXT,
@@ -139,30 +141,33 @@ def init_db():
     
     # Varsayılan kullanıcıları ekle
     try:
-        conn.execute(
-            'INSERT OR IGNORE INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
             ('admin', 'admin123', 'Sistem Yöneticisi', 'admin')
         )
-        conn.execute(
-            'INSERT OR IGNORE INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
             ('kasiyer', 'kasiyer123', 'Kasiyer Kullanıcı', 'cashier')
         )
-        conn.execute(
-            'INSERT OR IGNORE INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
             ('personel', 'personel123', 'Personel Kullanıcı', 'user')
         )
-    except:
+    except Exception as e:
+        print(f"Kullanıcı ekleme hatası: {e}")
         pass
     
     # Varsayılan kasa durumu
     try:
-        conn.execute(
-            'INSERT OR IGNORE INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, 0, 0, 0)'
+        cursor.execute(
+            'INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, FALSE, 0, 0) ON CONFLICT (id) DO NOTHING'
         )
-    except:
+    except Exception as e:
+        print(f"Kasa durumu ekleme hatası: {e}")
         pass
     
     conn.commit()
+    cursor.close()
     conn.close()
 
 # Static dosyalar için route
@@ -206,18 +211,22 @@ def login():
     password = data.get('password')
     
     conn = get_db_connection()
-    user = conn.execute(
-        'SELECT * FROM users WHERE username = ? AND password = ?',
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        'SELECT * FROM users WHERE username = %s AND password = %s',
         (username, password)
-    ).fetchone()
+    )
+    user = cursor.fetchone()
     
     if user:
         # Son giriş zamanını güncelle
-        conn.execute(
-            'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
+        cursor.execute(
+            'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s',
             (user['id'],)
         )
         conn.commit()
+        cursor.close()
         conn.close()
         
         # Denetim kaydı ekle
@@ -233,6 +242,7 @@ def login():
             }
         })
     else:
+        cursor.close()
         conn.close()
         return jsonify({
             'status': 'error',
@@ -242,7 +252,12 @@ def login():
 @app.route('/api/products')
 def get_products():
     conn = get_db_connection()
-    products = conn.execute('SELECT * FROM products ORDER BY name').fetchall()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM products ORDER BY name')
+    products = cursor.fetchall()
+    
+    cursor.close()
     conn.close()
     
     products_list = []
@@ -268,18 +283,20 @@ def add_stock():
     user_id = data.get('user_id', 1)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
         # Ürün var mı kontrol et
-        product = conn.execute(
-            'SELECT * FROM products WHERE barcode = ?', (barcode,)
-        ).fetchone()
+        cursor.execute(
+            'SELECT * FROM products WHERE barcode = %s', (barcode,)
+        )
+        product = cursor.fetchone()
         
         if product:
             # Ürün varsa stok güncelle
             new_quantity = product['quantity'] + quantity
-            conn.execute(
-                'UPDATE products SET quantity = ? WHERE barcode = ?',
+            cursor.execute(
+                'UPDATE products SET quantity = %s WHERE barcode = %s',
                 (new_quantity, barcode)
             )
             movement_type = 'in'
@@ -287,18 +304,20 @@ def add_stock():
         else:
             # Yeni ürün ekle
             if not name or not price:
+                cursor.close()
+                conn.close()
                 return jsonify({'status': 'error', 'message': 'Yeni ürün için ad ve fiyat gereklidir'})
             
-            conn.execute(
-                'INSERT INTO products (barcode, name, price, quantity, kdv, otv, min_stock_level) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            cursor.execute(
+                'INSERT INTO products (barcode, name, price, quantity, kdv, otv, min_stock_level) VALUES (%s, %s, %s, %s, %s, %s, %s)',
                 (barcode, name, price, quantity, kdv, otv, min_stock_level)
             )
             movement_type = 'new'
             product_name = name
         
         # Stok hareketi kaydı ekle
-        conn.execute(
-            'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (?, ?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
             (barcode, product_name, movement_type, quantity, user_id)
         )
         
@@ -306,6 +325,7 @@ def add_stock():
         log_audit(user_id, 'stock_update', f'{quantity} adet stok eklendi: {barcode} - {product_name}')
         
         conn.commit()
+        cursor.close()
         conn.close()
         
         # WebSocket ile bildirim gönder
@@ -315,6 +335,7 @@ def add_stock():
         
     except Exception as e:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': str(e)})
 
@@ -330,53 +351,56 @@ def make_sale():
     user_id = data.get('user_id', 1)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
         # Satış kaydı oluştur
-        cursor = conn.execute(
-            'INSERT INTO sales (total_amount, payment_method, cash_amount, credit_card_amount, change_amount, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO sales (total_amount, payment_method, cash_amount, credit_card_amount, change_amount, user_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
             (total, payment_method, cash_amount, credit_card_amount, change_amount, user_id)
         )
-        sale_id = cursor.lastrowid
+        sale_id = cursor.fetchone()['id']
         
         # Satış detaylarını ekle ve stokları güncelle
         for item in items:
-            conn.execute(
-                'INSERT INTO sale_items (sale_id, barcode, product_name, quantity, price) VALUES (?, ?, ?, ?, ?)',
+            cursor.execute(
+                'INSERT INTO sale_items (sale_id, barcode, product_name, quantity, price) VALUES (%s, %s, %s, %s, %s)',
                 (sale_id, item['barcode'], item['name'], item['quantity'], item['price'])
             )
             
             # Stok güncelle
-            product = conn.execute(
-                'SELECT quantity FROM products WHERE barcode = ?', (item['barcode'],)
-            ).fetchone()
+            cursor.execute(
+                'SELECT quantity FROM products WHERE barcode = %s', (item['barcode'],)
+            )
+            product = cursor.fetchone()
             
             if product:
                 new_quantity = product['quantity'] - item['quantity']
-                conn.execute(
-                    'UPDATE products SET quantity = ? WHERE barcode = ?',
+                cursor.execute(
+                    'UPDATE products SET quantity = %s WHERE barcode = %s',
                     (new_quantity, item['barcode'])
                 )
                 
                 # Stok hareketi kaydı
-                conn.execute(
-                    'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (?, ?, ?, ?, ?)',
+                cursor.execute(
+                    'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
                     (item['barcode'], item['name'], 'out', item['quantity'], user_id)
                 )
         
         # Kasa hareketi
         if payment_method == 'nakit' and cash_amount > 0:
-            conn.execute(
-                'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (?, ?, ?, ?)',
+            cursor.execute(
+                'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
                 ('sale', total, user_id, f'Satış #{sale_id}')
             )
             
             # Kasa bakiyesini güncelle (kasa açıksa)
-            cash_status = conn.execute('SELECT * FROM cash_register WHERE id = 1').fetchone()
+            cursor.execute('SELECT * FROM cash_register WHERE id = 1')
+            cash_status = cursor.fetchone()
             if cash_status and cash_status['is_open']:
                 new_balance = cash_status['current_amount'] + cash_amount
-                conn.execute(
-                    'UPDATE cash_register SET current_amount = ? WHERE id = 1',
+                cursor.execute(
+                    'UPDATE cash_register SET current_amount = %s WHERE id = 1',
                     (new_balance,)
                 )
         
@@ -384,6 +408,7 @@ def make_sale():
         log_audit(user_id, 'sale', f'Satış yapıldı: #{sale_id} - {total} TL - {payment_method}')
         
         conn.commit()
+        cursor.close()
         conn.close()
         
         # WebSocket ile bildirim gönder
@@ -393,6 +418,7 @@ def make_sale():
         
     except Exception as e:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': str(e)})
 
@@ -400,27 +426,34 @@ def make_sale():
 @app.route('/api/cash/status')
 def cash_status():
     conn = get_db_connection()
-    cash_status = conn.execute('SELECT * FROM cash_register WHERE id = 1').fetchone()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM cash_register WHERE id = 1')
+    cash_status = cursor.fetchone()
     
     if not cash_status:
         # Varsayılan kasa durumu
-        conn.execute('INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, 0, 0, 0)')
+        cursor.execute('INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, FALSE, 0, 0)')
         conn.commit()
-        cash_status = conn.execute('SELECT * FROM cash_register WHERE id = 1').fetchone()
+        cursor.execute('SELECT * FROM cash_register WHERE id = 1')
+        cash_status = cursor.fetchone()
     
     # Bugünkü nakit satışlar
     today = datetime.now().strftime('%Y-%m-%d')
-    cash_sales = conn.execute(
-        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = "nakit" AND DATE(sale_date) = ?',
-        (today,)
-    ).fetchone()
+    cursor.execute(
+        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
+        ('nakit', today)
+    )
+    cash_sales = cursor.fetchone()
     
     # Bugünkü kartlı satışlar
-    card_sales = conn.execute(
-        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = "kredi" AND DATE(sale_date) = ?',
-        (today,)
-    ).fetchone()
+    cursor.execute(
+        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
+        ('kredi', today)
+    )
+    card_sales = cursor.fetchone()
     
+    cursor.close()
     conn.close()
     
     return jsonify({
@@ -443,17 +476,18 @@ def open_cash():
     user_id = data.get('user_id', 1)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
         # Kasa durumunu güncelle
-        conn.execute(
-            'UPDATE cash_register SET is_open = 1, current_amount = ?, opening_balance = ?, opening_time = CURRENT_TIMESTAMP WHERE id = 1',
+        cursor.execute(
+            'UPDATE cash_register SET is_open = TRUE, current_amount = %s, opening_balance = %s, opening_time = CURRENT_TIMESTAMP WHERE id = 1',
             (initial_amount, initial_amount)
         )
         
         # Kasa hareketi kaydı
-        conn.execute(
-            'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
             ('open', initial_amount, user_id, 'Kasa açılışı')
         )
         
@@ -461,12 +495,14 @@ def open_cash():
         log_audit(user_id, 'cash_open', f'Kasa açıldı - Başlangıç bakiyesi: {initial_amount} TL')
         
         conn.commit()
+        cursor.close()
         conn.close()
         
         return jsonify({'status': 'success', 'message': 'Kasa açıldı'})
         
     except Exception as e:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': str(e)})
 
@@ -476,12 +512,16 @@ def close_cash():
     user_id = data.get('user_id', 1)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
         # Kasa durumunu al
-        cash_status = conn.execute('SELECT * FROM cash_register WHERE id = 1').fetchone()
+        cursor.execute('SELECT * FROM cash_register WHERE id = 1')
+        cash_status = cursor.fetchone()
         
         if not cash_status or not cash_status['is_open']:
+            cursor.close()
+            conn.close()
             return jsonify({'status': 'error', 'message': 'Kasa zaten kapalı'})
         
         # Kasa kapanış işlemi
@@ -490,26 +530,27 @@ def close_cash():
         
         # Bugünkü nakit satışları hesapla
         if cash_status['opening_time']:
-            opening_date = datetime.strptime(cash_status['opening_time'], '%Y-%m-%d %H:%M:%S')
+            opening_date = cash_status['opening_time']
             today_start = opening_date.strftime('%Y-%m-%d')
         else:
             today_start = datetime.now().strftime('%Y-%m-%d')
             
-        cash_sales = conn.execute(
-            'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = "nakit" AND DATE(sale_date) >= ?',
-            (today_start,)
-        ).fetchone()
+        cursor.execute(
+            'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) >= %s',
+            ('nakit', today_start)
+        )
+        cash_sales = cursor.fetchone()
         
         expected_cash = opening_balance + (cash_sales['total'] or 0)
         
         # Kasa durumunu güncelle
-        conn.execute(
-            'UPDATE cash_register SET is_open = 0, current_amount = 0, opening_balance = 0, closing_time = CURRENT_TIMESTAMP WHERE id = 1'
+        cursor.execute(
+            'UPDATE cash_register SET is_open = FALSE, current_amount = 0, opening_balance = 0, closing_time = CURRENT_TIMESTAMP WHERE id = 1'
         )
         
         # Kasa hareketi kaydı
-        conn.execute(
-            'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
             ('close', final_amount, user_id, f'Kasa kapanışı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL')
         )
         
@@ -517,12 +558,14 @@ def close_cash():
         log_audit(user_id, 'cash_close', f'Kasa kapandı - Son bakiye: {final_amount} TL')
         
         conn.commit()
+        cursor.close()
         conn.close()
         
         return jsonify({'status': 'success', 'message': 'Kasa kapandı'})
         
     except Exception as e:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': str(e)})
 
@@ -531,15 +574,19 @@ def cash_transactions():
     limit = request.args.get('limit', 50, type=int)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
-    transactions = conn.execute('''
+    cursor.execute('''
         SELECT ct.*, u.full_name as user_name 
         FROM cash_transactions ct 
         LEFT JOIN users u ON ct.user_id = u.id 
         ORDER BY ct.transaction_date DESC 
-        LIMIT ?
-    ''', (limit,)).fetchall()
+        LIMIT %s
+    ''', (limit,))
     
+    transactions = cursor.fetchall()
+    
+    cursor.close()
     conn.close()
     
     transactions_list = []
@@ -555,27 +602,33 @@ def cash_transactions():
 @app.route('/api/reports/daily-summary')
 def daily_summary():
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Bugünkü satışlar
     today = datetime.now().strftime('%Y-%m-%d')
-    sales_today = conn.execute(
-        'SELECT SUM(total_amount) as total FROM sales WHERE DATE(sale_date) = ?',
+    cursor.execute(
+        'SELECT SUM(total_amount) as total FROM sales WHERE DATE(sale_date) = %s',
         (today,)
-    ).fetchone()
+    )
+    sales_today = cursor.fetchone()
     
     # Toplam ürün sayısı
-    total_products = conn.execute('SELECT COUNT(*) as count FROM products').fetchone()
+    cursor.execute('SELECT COUNT(*) as count FROM products')
+    total_products = cursor.fetchone()
     
     # Azalan stoklar
-    low_stock = conn.execute(
+    cursor.execute(
         'SELECT COUNT(*) as count FROM products WHERE quantity <= min_stock_level AND quantity > 0'
-    ).fetchone()
+    )
+    low_stock = cursor.fetchone()
     
     # Stokta olmayan ürünler
-    out_of_stock = conn.execute(
+    cursor.execute(
         'SELECT COUNT(*) as count FROM products WHERE quantity = 0'
-    ).fetchone()
+    )
+    out_of_stock = cursor.fetchone()
     
+    cursor.close()
     conn.close()
     
     return jsonify({
@@ -591,11 +644,14 @@ def daily_summary():
 @app.route('/api/inventory/low-stock')
 def low_stock():
     conn = get_db_connection()
+    cursor = conn.cursor()
     
-    low_stock_products = conn.execute(
+    cursor.execute(
         'SELECT * FROM products WHERE quantity <= min_stock_level ORDER BY quantity ASC'
-    ).fetchall()
+    )
+    low_stock_products = cursor.fetchall()
     
+    cursor.close()
     conn.close()
     
     products_list = []
@@ -610,16 +666,26 @@ def low_stock():
 @app.route('/api/inventory/stock-value')
 def stock_value():
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Stok istatistikleri
-    total_products = conn.execute('SELECT COUNT(*) as count FROM products').fetchone()
-    in_stock = conn.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 5').fetchone()
-    low_stock = conn.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 0 AND quantity <= 5').fetchone()
-    out_of_stock = conn.execute('SELECT COUNT(*) as count FROM products WHERE quantity = 0').fetchone()
+    cursor.execute('SELECT COUNT(*) as count FROM products')
+    total_products = cursor.fetchone()
+    
+    cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 5')
+    in_stock = cursor.fetchone()
+    
+    cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 0 AND quantity <= 5')
+    low_stock = cursor.fetchone()
+    
+    cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity = 0')
+    out_of_stock = cursor.fetchone()
     
     # Toplam stok değeri
-    stock_value = conn.execute('SELECT SUM(price * quantity) as total FROM products').fetchone()
+    cursor.execute('SELECT SUM(price * quantity) as total FROM products')
+    stock_value = cursor.fetchone()
     
+    cursor.close()
     conn.close()
     
     return jsonify({
@@ -640,6 +706,7 @@ def sales_report():
     end_date = request.args.get('end_date')
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     query = '''
         SELECT s.*, u.full_name as user_name 
@@ -649,14 +716,16 @@ def sales_report():
     params = []
     
     if start_date and end_date:
-        query += ' WHERE DATE(s.sale_date) BETWEEN ? AND ?'
+        query += ' WHERE DATE(s.sale_date) BETWEEN %s AND %s'
         params.extend([start_date, end_date])
     
-    query += ' ORDER BY s.sale_date DESC LIMIT ?'
+    query += ' ORDER BY s.sale_date DESC LIMIT %s'
     params.append(limit)
     
-    sales = conn.execute(query, params).fetchall()
+    cursor.execute(query, params)
+    sales = cursor.fetchall()
     
+    cursor.close()
     conn.close()
     
     sales_list = []
@@ -673,15 +742,19 @@ def stock_movements():
     limit = request.args.get('limit', 50, type=int)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
-    movements = conn.execute('''
+    cursor.execute('''
         SELECT sm.*, u.full_name as user_name 
         FROM stock_movements sm 
         LEFT JOIN users u ON sm.user_id = u.id 
         ORDER BY sm.movement_date DESC 
-        LIMIT ?
-    ''', (limit,)).fetchall()
+        LIMIT %s
+    ''', (limit,))
     
+    movements = cursor.fetchall()
+    
+    cursor.close()
     conn.close()
     
     movements_list = []
@@ -696,23 +769,30 @@ def stock_movements():
 @app.route('/api/reports/receipt/<int:sale_id>')
 def get_receipt(sale_id):
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Satış bilgileri
-    sale = conn.execute('''
+    cursor.execute('''
         SELECT s.*, u.full_name as user_name 
         FROM sales s 
         LEFT JOIN users u ON s.user_id = u.id 
-        WHERE s.id = ?
-    ''', (sale_id,)).fetchone()
+        WHERE s.id = %s
+    ''', (sale_id,))
+    
+    sale = cursor.fetchone()
     
     if not sale:
+        cursor.close()
+        conn.close()
         return jsonify({'status': 'error', 'message': 'Fiş bulunamadı'})
     
     # Satış detayları
-    items = conn.execute(
-        'SELECT * FROM sale_items WHERE sale_id = ?', (sale_id,)
-    ).fetchall()
+    cursor.execute(
+        'SELECT * FROM sale_items WHERE sale_id = %s', (sale_id,)
+    )
+    items = cursor.fetchall()
     
+    cursor.close()
     conn.close()
     
     receipt = {
@@ -733,7 +813,12 @@ def get_receipt(sale_id):
 @app.route('/api/users')
 def get_users():
     conn = get_db_connection()
-    users = conn.execute('SELECT id, username, full_name, role, last_login, created_at FROM users ORDER BY created_at DESC').fetchall()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT id, username, full_name, role, last_login, created_at FROM users ORDER BY created_at DESC')
+    users = cursor.fetchall()
+    
+    cursor.close()
     conn.close()
     
     users_list = []
@@ -759,10 +844,11 @@ def create_user():
         return jsonify({'status': 'error', 'message': 'Tüm alanlar gereklidir'})
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     try:
-        conn.execute(
-            'INSERT INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)',
+        cursor.execute(
+            'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s)',
             (username, password, full_name, role)
         )
         
@@ -770,32 +856,40 @@ def create_user():
         log_audit(user_id, 'user_create', f'Yeni kullanıcı oluşturuldu: {username} - {full_name}')
         
         conn.commit()
+        cursor.close()
         conn.close()
         
         return jsonify({'status': 'success', 'message': 'Kullanıcı başarıyla oluşturuldu'})
         
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': 'Bu kullanıcı adı zaten kullanılıyor'})
     except Exception as e:
         conn.rollback()
+        cursor.close()
         conn.close()
         return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/api/admin/system-stats')
 def system_stats():
     conn = get_db_connection()
+    cursor = conn.cursor()
     
     # Toplam kullanıcı sayısı
-    total_users = conn.execute('SELECT COUNT(*) as count FROM users').fetchone()
+    cursor.execute('SELECT COUNT(*) as count FROM users')
+    total_users = cursor.fetchone()
     
     # Toplam satış sayısı
-    total_sales = conn.execute('SELECT COUNT(*) as count FROM sales').fetchone()
+    cursor.execute('SELECT COUNT(*) as count FROM sales')
+    total_sales = cursor.fetchone()
     
     # Toplam ciro
-    total_revenue = conn.execute('SELECT SUM(total_amount) as total FROM sales').fetchone()
+    cursor.execute('SELECT SUM(total_amount) as total FROM sales')
+    total_revenue = cursor.fetchone()
     
+    cursor.close()
     conn.close()
     
     return jsonify({
@@ -812,15 +906,19 @@ def audit_logs():
     limit = request.args.get('limit', 100, type=int)
     
     conn = get_db_connection()
+    cursor = conn.cursor()
     
-    logs = conn.execute('''
+    cursor.execute('''
         SELECT al.*, u.username, u.full_name 
         FROM audit_logs al 
         LEFT JOIN users u ON al.user_id = u.id 
         ORDER BY al.created_at DESC 
-        LIMIT ?
-    ''', (limit,)).fetchall()
+        LIMIT %s
+    ''', (limit,))
     
+    logs = cursor.fetchall()
+    
+    cursor.close()
     conn.close()
     
     logs_list = []
@@ -845,11 +943,14 @@ def export_backup():
 # Yardımcı fonksiyonlar
 def log_audit(user_id, action, description, ip_address=None):
     conn = get_db_connection()
-    conn.execute(
-        'INSERT INTO audit_logs (user_id, action, description, ip_address) VALUES (?, ?, ?, ?)',
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        'INSERT INTO audit_logs (user_id, action, description, ip_address) VALUES (%s, %s, %s, %s)',
         (user_id, action, description, ip_address or request.remote_addr)
     )
     conn.commit()
+    cursor.close()
     conn.close()
 
 # SocketIO events
