@@ -18,7 +18,6 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = 'tekel-pos-secret-key-2024'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Geri kalan TÜM kod aynı kalıyor...
 # Veritabanı bağlantısı
 def get_db_connection():
     conn = sqlite3.connect('database.db', check_same_thread=False)
