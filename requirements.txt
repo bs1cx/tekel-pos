@@ -2,5 +2,4 @@ flask==2.3.3
 flask-socketio==5.3.6
 python-socketio==5.10.0
 qrcode==7.4.2
-pillow==9.5.0
 psycopg2-binary==2.9.7
