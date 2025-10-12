@@ -2,3 +2,4 @@ Flask==2.3.3
 Flask-SocketIO==5.3.6
 pg8000==1.30.4
 qrcode[pil]==7.4.2
+psycopg2-binary==2.9.7
