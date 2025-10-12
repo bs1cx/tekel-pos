@@ -1,11 +1,10 @@
-# render.yaml
 services:
   - type: web
     name: tekel-pos
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: gunicorn app:app --worker-class sync
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.0
