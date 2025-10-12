@@ -558,6 +558,60 @@ def get_product(barcode):
         if conn:
             release_db_connection(conn)
 
+@app.route('/api/products', methods=['POST'])
+@require_auth
+@transaction_handler
+def create_product(cursor):
+    data = request.get_json()
+    
+    # Validasyon
+    errors = validate_product_data(data)
+    if errors:
+        return jsonify({
+            'status': 'error',
+            'message': '; '.join(errors)
+        }), 400
+    
+    barcode = data.get('barcode')
+    name = data.get('name')
+    price = data.get('price', 0)
+    quantity = data.get('quantity', 0)
+    kdv = data.get('kdv', 18)
+    otv = data.get('otv', 0)
+    min_stock_level = data.get('min_stock_level', 5)
+    user_id = getattr(request, 'user_id', 1)
+    
+    # Ürün var mı kontrol et
+    cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
+    existing_product = cursor.fetchone()
+    
+    if existing_product:
+        return jsonify({
+            'status': 'error',
+            'message': 'Bu barkod zaten kullanılıyor'
+        }), 400
+    
+    # Yeni ürün ekle
+    cursor.execute('''
+        INSERT INTO products (barcode, name, price, quantity, kdv, otv, min_stock_level) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ''', (barcode, name, price, quantity, kdv, otv, min_stock_level))
+    
+    # Stok hareketi kaydı (yeni ürün)
+    if quantity > 0:
+        cursor.execute(
+            'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
+            (barcode, name, 'new', quantity, user_id)
+        )
+    
+    # Denetim kaydı
+    log_audit(user_id, 'product_create', f'Yeni ürün eklendi: {barcode} - {name}')
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'Ürün başarıyla eklendi'
+    })
+
 @app.route('/api/products/<barcode>', methods=['PUT'])
 @require_auth
 def update_product(barcode):
@@ -587,6 +641,11 @@ def update_product(barcode):
                 'message': 'Ürün bulunamadı'
             }), 404
         
+        # Eski miktarı kaydet
+        old_quantity = product['quantity']
+        new_quantity = data.get('quantity', old_quantity)
+        quantity_diff = new_quantity - old_quantity
+        
         # Ürünü güncelle
         cursor.execute('''
             UPDATE products 
@@ -595,12 +654,20 @@ def update_product(barcode):
         ''', (
             data.get('name', product['name']),
             data.get('price', product['price']),
-            data.get('quantity', product['quantity']),
+            new_quantity,
             data.get('kdv', product['kdv']),
             data.get('otv', product['otv']),
             data.get('min_stock_level', product['min_stock_level']),
             barcode
         ))
+        
+        # Stok hareketi kaydı (miktar değiştiyse)
+        if quantity_diff != 0:
+            movement_type = 'in' if quantity_diff > 0 else 'out'
+            cursor.execute(
+                'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
+                (barcode, data.get('name', product['name']), movement_type, abs(quantity_diff), getattr(request, 'user_id', 1))
+            )
         
         conn.commit()
         
@@ -626,6 +693,33 @@ def update_product(barcode):
             cursor.close()
         if conn:
             release_db_connection(conn)
+
+@app.route('/api/products/<barcode>', methods=['DELETE'])
+@require_auth
+@transaction_handler
+def delete_product(cursor, barcode):
+    user_id = getattr(request, 'user_id', 1)
+    
+    # Ürün var mı kontrol et
+    cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
+    product = cursor.fetchone()
+    
+    if not product:
+        return jsonify({
+            'status': 'error',
+            'message': 'Ürün bulunamadı'
+        }), 404
+    
+    # Ürünü sil
+    cursor.execute('DELETE FROM products WHERE barcode = %s', (barcode,))
+    
+    # Denetim kaydı
+    log_audit(user_id, 'product_delete', f'Ürün silindi: {barcode} - {product["name"]}')
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'Ürün başarıyla silindi'
+    })
 
 @app.route('/api/stock/add', methods=['POST'])
 @require_auth
@@ -894,253 +988,85 @@ def open_cash(cursor):
     )
     
     # Denetim kaydı
-    log_audit(user_id, 'cash_open', f'Kasa açıldı - Başlangıç bakiyesi: {initial_amount} TL')
+    log_audit(user_id, 'cash_open', f'Kasa açıldı - Başlangıç: {initial_amount} TL')
     
     return jsonify({
-        'status': 'success', 
-        'message': 'Kasa açıldı'
+        'status': 'success',
+        'message': 'Kasa başarıyla açıldı'
     })
 
 @app.route('/api/cash/close', methods=['POST'])
 @require_auth
 @transaction_handler
 def close_cash(cursor):
+    data = request.get_json()
+    final_amount = data.get('final_amount', 0)
     user_id = getattr(request, 'user_id', 1)
     
-    # Kasa durumunu al
+    if final_amount < 0:
+        return jsonify({
+            'status': 'error',
+            'message': 'Kapanış bakiyesi negatif olamaz'
+        }), 400
+    
+    # Kasa açık mı kontrol et
     cursor.execute('SELECT * FROM cash_register WHERE id = 1')
     cash_status = cursor.fetchone()
     
     if not cash_status or not cash_status['is_open']:
         return jsonify({
-            'status': 'error', 
+            'status': 'error',
             'message': 'Kasa zaten kapalı'
         }), 400
     
-    # Kasa kapanış işlemi
-    final_amount = cash_status['current_amount']
-    opening_balance = cash_status['opening_balance']
-    
-    # Açılış tarihinden bugüne kadar olan nakit satışları hesapla
-    if cash_status['opening_time']:
-        opening_date = cash_status['opening_time']
-        start_date = opening_date.strftime('%Y-%m-%d')
-    else:
-        start_date = datetime.now().strftime('%Y-%m-%d')
-        
+    # Bugünkü nakit satışları hesapla
     cursor.execute(
-        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) >= %s',
-        ('nakit', start_date)
+        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
+        ('nakit', datetime.now().strftime('%Y-%m-%d'))
     )
     cash_sales = cursor.fetchone()
+    cash_sales_total = cash_sales['total'] or 0
     
-    expected_cash = opening_balance + (cash_sales['total'] or 0)
+    # Beklenen nakit miktarı
+    expected_cash = (cash_status['opening_balance'] or 0) + cash_sales_total
     
     # Kasa durumunu güncelle
     cursor.execute(
-        'UPDATE cash_register SET is_open = FALSE, current_amount = 0, opening_balance = 0, closing_time = CURRENT_TIMESTAMP WHERE id = 1'
+        'UPDATE cash_register SET is_open = FALSE, current_amount = 0, closing_time = CURRENT_TIMESTAMP WHERE id = 1'
     )
     
     # Kasa hareketi kaydı
     cursor.execute(
         'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
-        ('close', final_amount, user_id, f'Kasa kapanışı - Beklenen: {expected_cash:.2f} TL, Gerçek: {final_amount:.2f} TL')
+        ('close', final_amount, user_id, f'Kasa kapanışı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL')
     )
     
     # Denetim kaydı
-    log_audit(user_id, 'cash_close', f'Kasa kapandı - Son bakiye: {final_amount:.2f} TL')
+    log_audit(user_id, 'cash_close', 
+             f'Kasa kapandı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL')
     
     return jsonify({
-        'status': 'success', 
-        'message': 'Kasa kapandı',
-        'final_amount': final_amount,
-        'expected_amount': expected_cash
+        'status': 'success',
+        'message': 'Kasa başarıyla kapandı',
+        'summary': {
+            'opening_balance': cash_status['opening_balance'],
+            'cash_sales': cash_sales_total,
+            'expected_cash': expected_cash,
+            'actual_cash': final_amount,
+            'difference': final_amount - expected_cash
+        }
     })
 
-@app.route('/api/cash/transactions')
-@require_auth
-def cash_transactions():
-    conn = None
-    cursor = None
-    try:
-        limit = request.args.get('limit', 50, type=int)
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT ct.*, u.full_name as user_name 
-            FROM cash_transactions ct 
-            LEFT JOIN users u ON ct.user_id = u.id 
-            ORDER BY ct.transaction_date DESC 
-            LIMIT %s
-        ''', (limit,))
-        
-        transactions = cursor.fetchall()
-        
-        transactions_list = [dict(transaction) for transaction in transactions]
-        
-        return jsonify({
-            'status': 'success',
-            'transactions': transactions_list
-        })
-    except Exception as e:
-        logger.error(f"Cash transactions error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Kasa hareketleri yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
 # RAPORLAMA API'leri
-@app.route('/api/reports/daily-summary')
-@require_auth
-def daily_summary():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Bugünkü satışlar
-        today = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute(
-            'SELECT SUM(total_amount) as total FROM sales WHERE DATE(sale_date) = %s',
-            (today,)
-        )
-        sales_today = cursor.fetchone()
-        
-        # Toplam ürün sayısı
-        cursor.execute('SELECT COUNT(*) as count FROM products')
-        total_products = cursor.fetchone()
-        
-        # Azalan stoklar
-        cursor.execute(
-            'SELECT COUNT(*) as count FROM products WHERE quantity <= min_stock_level AND quantity > 0'
-        )
-        low_stock = cursor.fetchone()
-        
-        # Stokta olmayan ürünler
-        cursor.execute(
-            'SELECT COUNT(*) as count FROM products WHERE quantity = 0'
-        )
-        out_of_stock = cursor.fetchone()
-        
-        return jsonify({
-            'status': 'success',
-            'summary': {
-                'total_revenue': sales_today['total'] or 0,
-                'total_products': total_products['count'],
-                'low_stock_count': low_stock['count'],
-                'out_of_stock_count': out_of_stock['count']
-            }
-        })
-    except Exception as e:
-        logger.error(f"Daily summary error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Günlük özet yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/inventory/low-stock')
-@require_auth
-def low_stock():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'SELECT * FROM products WHERE quantity <= min_stock_level ORDER BY quantity ASC'
-        )
-        low_stock_products = cursor.fetchall()
-        
-        products_list = [dict(product) for product in low_stock_products]
-        
-        return jsonify({
-            'status': 'success',
-            'products': products_list
-        })
-    except Exception as e:
-        logger.error(f"Low stock error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Düşük stok ürünleri yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/inventory/stock-value')
-@require_auth
-def stock_value():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Stok istatistikleri
-        cursor.execute('SELECT COUNT(*) as count FROM products')
-        total_products = cursor.fetchone()
-        
-        cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 5')
-        in_stock = cursor.fetchone()
-        
-        cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity > 0 AND quantity <= 5')
-        low_stock = cursor.fetchone()
-        
-        cursor.execute('SELECT COUNT(*) as count FROM products WHERE quantity = 0')
-        out_of_stock = cursor.fetchone()
-        
-        # Toplam stok değeri
-        cursor.execute('SELECT SUM(price * quantity) as total FROM products')
-        stock_value = cursor.fetchone()
-        
-        return jsonify({
-            'status': 'success',
-            'value': {
-                'total_products': total_products['count'],
-                'in_stock': in_stock['count'],
-                'low_stock': low_stock['count'],
-                'out_of_stock': out_of_stock['count'],
-                'total_value': stock_value['total'] or 0
-            }
-        })
-    except Exception as e:
-        logger.error(f"Stock value error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Stok değeri hesaplanırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
 @app.route('/api/reports/sales')
 @require_auth
 def sales_report():
+    date_from = request.args.get('date_from')
+    date_to = request.args.get('date_to')
+    
     conn = None
     cursor = None
     try:
-        limit = request.args.get('limit', 50, type=int)
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -1148,30 +1074,45 @@ def sales_report():
             SELECT s.*, u.full_name as user_name 
             FROM sales s 
             LEFT JOIN users u ON s.user_id = u.id 
+            WHERE 1=1
         '''
         params = []
         
-        if start_date and end_date:
-            query += ' WHERE DATE(s.sale_date) BETWEEN %s AND %s'
-            params.extend([start_date, end_date])
+        if date_from:
+            query += ' AND DATE(s.sale_date) >= %s'
+            params.append(date_from)
         
-        query += ' ORDER BY s.sale_date DESC LIMIT %s'
-        params.append(limit)
+        if date_to:
+            query += ' AND DATE(s.sale_date) <= %s'
+            params.append(date_to)
+        
+        query += ' ORDER BY s.sale_date DESC LIMIT 1000'
         
         cursor.execute(query, params)
         sales = cursor.fetchall()
         
-        sales_list = [dict(sale) for sale in sales]
+        # Satış detaylarını getir
+        sales_with_items = []
+        for sale in sales:
+            cursor.execute(
+                'SELECT * FROM sale_items WHERE sale_id = %s',
+                (sale['id'],)
+            )
+            items = cursor.fetchall()
+            
+            sale_dict = dict(sale)
+            sale_dict['items'] = [dict(item) for item in items]
+            sales_with_items.append(sale_dict)
         
         return jsonify({
             'status': 'success',
-            'report': sales_list
+            'sales': sales_with_items
         })
     except Exception as e:
         logger.error(f"Sales report error: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': 'Satış raporu yüklenirken hata oluştu'
+            'message': 'Rapor alınırken hata oluştu'
         }), 500
     finally:
         if cursor:
@@ -1179,38 +1120,43 @@ def sales_report():
         if conn:
             release_db_connection(conn)
 
-@app.route('/api/reports/stock-movements')
+@app.route('/api/reports/stock')
 @require_auth
-def stock_movements():
+def stock_report():
     conn = None
     cursor = None
     try:
-        limit = request.args.get('limit', 50, type=int)
-        
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # Düşük stoklu ürünler
+        cursor.execute('''
+            SELECT * FROM products 
+            WHERE quantity <= min_stock_level 
+            ORDER BY quantity ASC
+        ''')
+        low_stock = cursor.fetchall()
+        
+        # Stok hareketleri
         cursor.execute('''
             SELECT sm.*, u.full_name as user_name 
             FROM stock_movements sm 
             LEFT JOIN users u ON sm.user_id = u.id 
             ORDER BY sm.movement_date DESC 
-            LIMIT %s
-        ''', (limit,))
-        
+            LIMIT 100
+        ''')
         movements = cursor.fetchall()
         
-        movements_list = [dict(movement) for movement in movements]
-        
         return jsonify({
             'status': 'success',
-            'movements': movements_list
+            'low_stock': [dict(item) for item in low_stock],
+            'movements': [dict(item) for item in movements]
         })
     except Exception as e:
-        logger.error(f"Stock movements error: {str(e)}")
+        logger.error(f"Stock report error: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': 'Stok hareketleri yüklenirken hata oluştu'
+            'message': 'Stok raporu alınırken hata oluştu'
         }), 500
     finally:
         if cursor:
@@ -1218,263 +1164,7 @@ def stock_movements():
         if conn:
             release_db_connection(conn)
 
-@app.route('/api/reports/receipt/<int:sale_id>')
-@require_auth
-def get_receipt(sale_id):
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Satış bilgileri
-        cursor.execute('''
-            SELECT s.*, u.full_name as user_name 
-            FROM sales s 
-            LEFT JOIN users u ON s.user_id = u.id 
-            WHERE s.id = %s
-        ''', (sale_id,))
-        
-        sale = cursor.fetchone()
-        
-        if not sale:
-            return jsonify({
-                'status': 'error', 
-                'message': 'Fiş bulunamadı'
-            }), 404
-        
-        # Satış detayları
-        cursor.execute(
-            'SELECT * FROM sale_items WHERE sale_id = %s', (sale_id,)
-        )
-        items = cursor.fetchall()
-        
-        receipt = {
-            'id': sale['id'],
-            'sale_date': sale['sale_date'],
-            'total_amount': sale['total_amount'],
-            'payment_method': sale['payment_method'],
-            'user_name': sale['user_name'],
-            'items': [dict(item) for item in items]
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'receipt': receipt
-        })
-    except Exception as e:
-        logger.error(f"Receipt error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Fiş bilgisi alınırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-# YÖNETİM API'leri
-@app.route('/api/users')
-@require_auth
-def get_users():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT id, username, full_name, role, last_login, created_at FROM users ORDER BY created_at DESC')
-        users = cursor.fetchall()
-        
-        users_list = [dict(user) for user in users]
-        
-        return jsonify({
-            'status': 'success',
-            'users': users_list
-        })
-    except Exception as e:
-        logger.error(f"Users error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Kullanıcılar yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/admin/users', methods=['POST'])
-@require_auth
-def create_user():
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    full_name = data.get('full_name')
-    role = data.get('role', 'user')
-    
-    user_id = getattr(request, 'user_id', 1)
-    
-    if not username or not password or not full_name:
-        return jsonify({
-            'status': 'error', 
-            'message': 'Tüm alanlar gereklidir'
-        }), 400
-    
-    if role not in ['admin', 'cashier', 'user']:
-        return jsonify({
-            'status': 'error',
-            'message': 'Geçersiz rol'
-        }), 400
-    
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        hashed_password = hash_password(password)
-        cursor.execute(
-            'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s)',
-            (username, hashed_password, full_name, role)
-        )
-        
-        # Denetim kaydı
-        log_audit(user_id, 'user_create', f'Yeni kullanıcı oluşturuldu: {username} - {full_name}')
-        
-        conn.commit()
-        
-        return jsonify({
-            'status': 'success', 
-            'message': 'Kullanıcı başarıyla oluşturuldu'
-        })
-        
-    except IntegrityError:
-        return jsonify({
-            'status': 'error', 
-            'message': 'Bu kullanıcı adı zaten kullanılıyor'
-        }), 400
-    except Exception as e:
-        logger.error(f"Create user error: {str(e)}")
-        if conn:
-            conn.rollback()
-        return jsonify({
-            'status': 'error', 
-            'message': 'Kullanıcı oluşturulurken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/admin/system-stats')
-@require_auth
-def system_stats():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Toplam kullanıcı sayısı
-        cursor.execute('SELECT COUNT(*) as count FROM users')
-        total_users = cursor.fetchone()
-        
-        # Toplam satış sayısı
-        cursor.execute('SELECT COUNT(*) as count FROM sales')
-        total_sales = cursor.fetchone()
-        
-        # Toplam ciro
-        cursor.execute('SELECT SUM(total_amount) as total FROM sales')
-        total_revenue = cursor.fetchone()
-        
-        return jsonify({
-            'status': 'success',
-            'stats': {
-                'total_users': total_users['count'],
-                'total_sales': total_sales['count'],
-                'total_revenue': total_revenue['total'] or 0
-            }
-        })
-    except Exception as e:
-        logger.error(f"System stats error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Sistem istatistikleri yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/audit/logs')
-@require_auth
-def audit_logs():
-    conn = None
-    cursor = None
-    try:
-        limit = request.args.get('limit', 100, type=int)
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT al.*, u.username, u.full_name 
-            FROM audit_logs al 
-            LEFT JOIN users u ON al.user_id = u.id 
-            ORDER BY al.created_at DESC 
-            LIMIT %s
-        ''', (limit,))
-        
-        logs = cursor.fetchall()
-        
-        logs_list = [dict(log) for log in logs]
-        
-        return jsonify({
-            'status': 'success',
-            'logs': logs_list
-        })
-    except Exception as e:
-        logger.error(f"Audit logs error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Denetim kayıtları yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            release_db_connection(conn)
-
-@app.route('/api/backup/export', methods=['GET'])
-@require_auth
-def export_backup():
-    # Basit yedekleme endpoint'i - gerçek uygulamada dosya oluşturulmalı
-    try:
-        backup_data = {
-            'timestamp': datetime.now().isoformat(),
-            'message': 'Yedekleme özelliği aktif - Gerçek uygulamada dosya oluşturulacak'
-        }
-        
-        log_audit(getattr(request, 'user_id', 1), 'backup_export', 'Sistem yedeklemesi alındı')
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Yedekleme başarılı',
-            'backup': backup_data,
-            'file_path': '/backups/tekel-pos-backup.json'
-        })
-    except Exception as e:
-        logger.error(f"Backup export error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Yedekleme sırasında hata oluştu'
-        }), 500
-
-# Yardımcı fonksiyonlar
+# YARDIMCI FONKSİYONLAR
 def log_audit(user_id, action, description, ip_address=None):
     """Denetim kaydı ekle"""
     conn = None
@@ -1488,25 +1178,37 @@ def log_audit(user_id, action, description, ip_address=None):
             (user_id, action, description, ip_address or request.remote_addr)
         )
         conn.commit()
-        
-        logger.info(f"Audit log: {action} - {description} - User: {user_id}")
     except Exception as e:
-        logger.error(f'Audit log error: {e}')
+        logger.error(f"Audit log error: {e}")
     finally:
         if cursor:
             cursor.close()
         if conn:
             release_db_connection(conn)
 
-# SocketIO events
+# WebSocket event'leri
 @socketio.on('connect')
 def handle_connect():
-    logger.info('Client connected')
-    emit('connected', {'message': 'Bağlantı kuruldu'})
+    logger.info(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Bağlantı başarılı'})
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    logger.info('Client disconnected')
+    logger.info(f"Client disconnected: {request.sid}")
+
+# Uygulama başlatma
+@app.before_first_request
+def startup():
+    try:
+        init_db_pool()
+        init_db()
+        logger.info("Application startup completed")
+    except Exception as e:
+        logger.error(f"Startup error: {e}")
+
+# Uygulama kapatma
+import atexit
+atexit.register(close_db_pool)
 
 # Hata yönetimi
 @app.errorhandler(404)
@@ -1521,40 +1223,26 @@ def internal_error(error):
     logger.error(f"Internal server error: {error}")
     return jsonify({
         'status': 'error',
-        'message': 'Sunucu hatası oluştu'
+        'message': 'Sunucu hatası'
     }), 500
 
-@app.errorhandler(Exception)
-def handle_exception(error):
-    logger.error(f"Unhandled exception: {error}")
-    logger.error(traceback.format_exc())
-    return jsonify({
-        'status': 'error',
-        'message': 'Beklenmeyen bir hata oluştu'
-    }), 500
+# Vercel için WSGI handler
+def handler(event, context):
+    return socketio.WSGIApp(app)
 
-# Uygulama başlatma
-def create_app():
-    """Uygulama factory function for Vercel"""
-    try:
-        # Veritabanını başlat
-        init_db()
-        logger.info("Application started successfully")
-    except Exception as e:
-        logger.error(f"Application startup error: {e}")
-        # Hata durumunda bile uygulamanın çalışmaya devam etmesi için
-        pass
-    
-    return app
-
-# Vercel için gerekli
-app = create_app()
-
-# Uygulama kapanırken pool'u temizle
-import atexit
-atexit.register(close_db_pool)
-
-# Yerel çalıştırma için
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
+    try:
+        init_db_pool()
+        init_db()
+        logger.info("Starting Flask application...")
+        
+        # Geliştirme sunucusu
+        socketio.run(
+            app, 
+            host='0.0.0.0', 
+            port=int(os.environ.get('PORT', 5000)),
+            debug=os.environ.get('DEBUG', 'False').lower() == 'true'
+        )
+    except Exception as e:
+        logger.error(f"Application startup failed: {e}")
+        raise
