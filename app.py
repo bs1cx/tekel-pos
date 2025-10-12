@@ -1,7 +1,6 @@
 import os
 import logging
 from flask import Flask, render_template, request, jsonify, send_from_directory
-from flask_socketio import SocketIO, emit
 import qrcode
 import io
 import base64
@@ -35,9 +34,6 @@ app = Flask(__name__,
 
 # Güvenli secret key
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-socketio = SocketIO(app, 
-                   cors_allowed_origins=os.environ.get('ALLOWED_ORIGINS', '*'),
-                   async_mode='eventlet')  # Render için eventlet kullan
 
 # PostgreSQL connection - Render için basitleştirilmiş
 def get_db_connection():
@@ -717,9 +713,6 @@ def add_stock(cursor):
     # Denetim kaydı
     log_audit(user_id, 'stock_update', f'{quantity} adet stok eklendi: {barcode} - {product_name}')
     
-    # WebSocket ile bildirim gönder
-    socketio.emit('stock_updated', {'barcode': barcode, 'quantity': quantity})
-    
     return jsonify({
         'status': 'success', 
         'message': 'Stok güncellendi'
@@ -811,9 +804,6 @@ def make_sale(cursor):
     
     # Denetim kaydı
     log_audit(user_id, 'sale', f'Satış yapıldı: #{sale_id} - {total} TL - {payment_method}')
-    
-    # WebSocket ile bildirim gönder
-    socketio.emit('sale_made', {'sale_id': sale_id, 'total': total})
     
     return jsonify({
         'status': 'success', 
@@ -1115,16 +1105,6 @@ def log_audit(user_id, action, description, ip_address=None):
         if conn:
             conn.close()
 
-# WebSocket event'leri
-@socketio.on('connect')
-def handle_connect():
-    logger.info(f"Client connected: {request.sid}")
-    emit('connected', {'message': 'Bağlantı başarılı'})
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    logger.info(f"Client disconnected: {request.sid}")
-
 # Uygulama başlatma
 @app.before_first_request
 def startup():
@@ -1159,8 +1139,7 @@ if __name__ == '__main__':
         logger.info("Starting Flask application...")
         
         port = int(os.environ.get('PORT', 5000))
-        socketio.run(
-            app, 
+        app.run(
             host='0.0.0.0', 
             port=port,
             debug=False
