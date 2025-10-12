@@ -37,108 +37,37 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 socketio = SocketIO(app, 
                    cors_allowed_origins=os.environ.get('ALLOWED_ORIGINS', '*'),
-                   async_mode='threading')
+                   async_mode='eventlet')  # Render için eventlet kullan
 
-# PostgreSQL connection pool
-db_pool = None
-
-def init_db_pool():
-    """Veritabanı connection pool'u başlat"""
-    global db_pool
-    try:
-        # Vercel environment variable kullan
-        database_url = os.environ.get('DATABASE_URL')
-        
-        if not database_url:
-            # Fallback olarak Supabase connection string (düzeltilmiş)
-            database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
-        
-        logger.info(f"Connecting to database: {database_url.split('@')[1] if '@' in database_url else database_url}")
-        
-        # Connection pool oluştur
-        db_pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=1,
-            maxconn=10,  # Vercel'de daha düşük limit
-            dsn=database_url,
-            cursor_factory=RealDictCursor
-        )
-        logger.info("Database connection pool initialized successfully")
-    except Exception as e:
-        logger.error(f"Database pool initialization error: {e}")
-        # Fallback: basit connection
-        try:
-            # Pool olmadan direkt bağlantı dene
-            conn = psycopg2.connect(
-                database_url,
-                cursor_factory=RealDictCursor
-            )
-            conn.close()
-            db_pool = None
-            logger.info("Using direct connections instead of pool")
-        except Exception as fallback_error:
-            logger.error(f"Fallback also failed: {fallback_error}")
-            raise
-
+# PostgreSQL connection - Render için basitleştirilmiş
 def get_db_connection():
-    """Connection pool'dan bağlantı al"""
-    global db_pool
+    """Render PostgreSQL bağlantısı"""
     max_retries = 3
     retry_delay = 1
     
     for attempt in range(max_retries):
         try:
-            if db_pool is None:
-                init_db_pool()
+            # Render environment variable'ını kullan
+            database_url = os.environ.get('DATABASE_URL')
             
-            # Pool kullanılıyorsa
-            if db_pool:
-                conn = db_pool.getconn()
-                # Bağlantıyı test et
-                cursor = conn.cursor()
-                cursor.execute('SELECT 1')
-                cursor.close()
-                return conn
-            else:
-                # Pool yoksa direkt bağlantı
-                database_url = os.environ.get('DATABASE_URL') or "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
-                conn = psycopg2.connect(
-                    database_url,
-                    cursor_factory=RealDictCursor
-                )
-                return conn
+            if not database_url:
+                # Fallback olarak Supabase
+                database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+            
+            logger.info(f"Database connection attempt {attempt + 1}")
+            conn = psycopg2.connect(
+                database_url,
+                cursor_factory=RealDictCursor
+            )
+            logger.info("Database connection successful")
+            return conn
                 
         except Exception as e:
-            logger.error(f"Get connection attempt {attempt + 1} failed: {e}")
+            logger.error(f"Connection attempt {attempt + 1} failed: {e}")
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
-                # Pool'u sıfırla
-                db_pool = None
             else:
                 raise
-
-def release_db_connection(conn):
-    """Bağlantıyı pool'a geri ver"""
-    global db_pool
-    try:
-        if db_pool and conn:
-            db_pool.putconn(conn)
-    except Exception as e:
-        logger.error(f"Release connection error: {e}")
-        # Hata durumunda bağlantıyı kapat
-        try:
-            conn.close()
-        except:
-            pass
-
-def close_db_pool():
-    """Connection pool'u kapat"""
-    global db_pool
-    if db_pool:
-        try:
-            db_pool.closeall()
-            logger.info("Database connection pool closed")
-        except Exception as e:
-            logger.error(f"Close pool error: {e}")
 
 # Decorator'lar
 def require_auth(f):
@@ -186,7 +115,7 @@ def transaction_handler(f):
             }), 500
         finally:
             if conn:
-                release_db_connection(conn)
+                conn.close()
     
     return decorated_function
 
@@ -393,7 +322,7 @@ def init_db():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 # Static dosyalar için route
 @app.route('/static/<path:path>')
@@ -492,7 +421,7 @@ def login():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/products')
 @require_auth
@@ -522,7 +451,7 @@ def get_products():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/products/<barcode>')
 @require_auth
@@ -556,7 +485,7 @@ def get_product(barcode):
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/products', methods=['POST'])
 @require_auth
@@ -692,7 +621,7 @@ def update_product(barcode):
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/products/<barcode>', methods=['DELETE'])
 @require_auth
@@ -949,7 +878,7 @@ def cash_status():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/cash/open', methods=['POST'])
 @require_auth
@@ -1118,7 +1047,7 @@ def sales_report():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 @app.route('/api/reports/stock')
 @require_auth
@@ -1162,7 +1091,7 @@ def stock_report():
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 # YARDIMCI FONKSİYONLAR
 def log_audit(user_id, action, description, ip_address=None):
@@ -1184,7 +1113,7 @@ def log_audit(user_id, action, description, ip_address=None):
         if cursor:
             cursor.close()
         if conn:
-            release_db_connection(conn)
+            conn.close()
 
 # WebSocket event'leri
 @socketio.on('connect')
@@ -1200,15 +1129,10 @@ def handle_disconnect():
 @app.before_first_request
 def startup():
     try:
-        init_db_pool()
         init_db()
         logger.info("Application startup completed")
     except Exception as e:
         logger.error(f"Startup error: {e}")
-
-# Uygulama kapatma
-import atexit
-atexit.register(close_db_pool)
 
 # Hata yönetimi
 @app.errorhandler(404)
@@ -1226,22 +1150,20 @@ def internal_error(error):
         'message': 'Sunucu hatası'
     }), 500
 
-# Vercel için WSGI handler
-def handler(event, context):
-    return socketio.WSGIApp(app)
+# Render için WSGI uyumluluğu
+app = app
 
 if __name__ == '__main__':
     try:
-        init_db_pool()
         init_db()
         logger.info("Starting Flask application...")
         
-        # Geliştirme sunucusu
+        port = int(os.environ.get('PORT', 5000))
         socketio.run(
             app, 
             host='0.0.0.0', 
-            port=int(os.environ.get('PORT', 5000)),
-            debug=os.environ.get('DEBUG', 'False').lower() == 'true'
+            port=port,
+            debug=False
         )
     except Exception as e:
         logger.error(f"Application startup failed: {e}")

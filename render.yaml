@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tekel-pos
+    env: python
+    plan: free
+    region: frankfurt
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --worker-class eventlet -w 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: tekel-pos-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: "*"

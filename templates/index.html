@@ -120,10 +120,10 @@
                     <div class="connection-info">
                         <div class="ip-display">
                             <i class="fas fa-wifi"></i>
-                            <span>IP: {{ local_ip }}</span>
+                            <span>IP: <span id="localIP">{{ local_ip }}</span></span>
                         </div>
                         <div class="qr-display">
-                            <img src="{{ qr_code }}" alt="QR Code">
+                            <img id="qrCodeImage" src="{{ qr_code }}" alt="QR Code">
                             <div class="qr-tooltip">
                                 <p>Sisteme bağlanmak için QR kodu tarayın</p>
                             </div>
@@ -226,7 +226,7 @@
                                 <h4>Ürün Listesi</h4>
                                 <div class="search-box">
                                     <i class="fas fa-search"></i>
-                                    <input type="text" id="productSearch" placeholder="Ürün ara...">
+                                    <input type="text" id="productSearch" placeholder="Ürün ara..." oninput="filterProducts()">
                                 </div>
                                 <div class="products-grid" id="productGrid">
                                     <div class="empty-state">
@@ -255,12 +255,12 @@
                                 <h4>Ödeme Yöntemi</h4>
                                 <div class="payment-options">
                                     <label class="payment-option">
-                                        <input type="radio" name="paymentMethod" value="nakit" checked>
+                                        <input type="radio" name="paymentMethod" value="nakit" checked onchange="toggleCashInput()">
                                         <span class="radio-custom"></span>
                                         <span>Nakit</span>
                                     </label>
                                     <label class="payment-option">
-                                        <input type="radio" name="paymentMethod" value="kredi">
+                                        <input type="radio" name="paymentMethod" value="kredi" onchange="toggleCashInput()">
                                         <span class="radio-custom"></span>
                                         <span>Kredi Kartı</span>
                                     </label>
@@ -268,7 +268,7 @@
                                 
                                 <div class="cash-input" id="cashInputSection">
                                     <label>Verilen Para:</label>
-                                    <input type="number" id="cashAmount" placeholder="0.00" step="0.01">
+                                    <input type="number" id="cashAmount" placeholder="0.00" step="0.01" oninput="calculateChange()">
                                     <div class="change-display" id="changeDisplay">
                                         Para Üstü: <span>0.00 TL</span>
                                     </div>
@@ -281,7 +281,7 @@
                                     <span id="subtotal">0.00 TL</span>
                                 </div>
                                 <div class="summary-row">
-                                    <span>KDV (%18):</span>
+                                    <span>KDV Toplam:</span>
                                     <span id="kdvAmount">0.00 TL</span>
                                 </div>
                                 <div class="summary-row total">
@@ -303,7 +303,7 @@
                         <div class="header-actions">
                             <div class="search-box">
                                 <i class="fas fa-search"></i>
-                                <input type="text" id="productsSearch" placeholder="Ürün ara...">
+                                <input type="text" id="productsSearch" placeholder="Ürün ara..." oninput="filterProductsTable()">
                             </div>
                             <button class="btn-primary" onclick="loadProducts()">
                                 <i class="fas fa-sync-alt"></i> Yenile
@@ -366,10 +366,13 @@
                     <div class="inventory-controls">
                         <div class="search-box">
                             <i class="fas fa-search"></i>
-                            <input type="text" id="inventorySearch" placeholder="Stok ara...">
+                            <input type="text" id="inventorySearch" placeholder="Stok ara..." oninput="filterInventory()">
                         </div>
                         <button class="btn-primary" onclick="loadInventory()">
                             <i class="fas fa-sync-alt"></i> Yenile
+                        </button>
+                        <button class="btn-success" onclick="openAddProductModal()">
+                            <i class="fas fa-plus"></i> Yeni Ürün
                         </button>
                     </div>
 
@@ -409,10 +412,10 @@
                         <div class="camera-section">
                             <h3><i class="fas fa-camera"></i> Barkod Tarama</h3>
                             <div class="camera-actions">
-                                <button class="btn-primary btn-large" id="startCameraBtn">
+                                <button class="btn-primary btn-large" id="startCameraBtn" onclick="startCamera()">
                                     <i class="fas fa-camera"></i> Kamerayı Aç
                                 </button>
-                                <button class="btn-secondary" id="stopCameraBtn" style="display: none;">
+                                <button class="btn-secondary" id="stopCameraBtn" style="display: none;" onclick="stopCamera()">
                                     <i class="fas fa-stop"></i> Durdur
                                 </button>
                             </div>
@@ -449,7 +452,7 @@
 
                             <div class="manual-product-form" id="manualProductForm" style="display: none;">
                                 <h4><i class="fas fa-plus-circle"></i> Yeni Ürün Ekle</h4>
-                                <form onsubmit="addNewProductFromMobile(event)">
+                                <form id="mobileProductForm" onsubmit="addNewProductFromMobile(event)">
                                     <input type="hidden" id="scannedBarcodeMobile">
                                     <div class="form-group">
                                         <label>Barkod:</label>
@@ -478,6 +481,10 @@
                                             <label>KDV (%):</label>
                                             <input type="number" id="productKDVMobile" step="0.01" value="18">
                                         </div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Min. Stok Seviyesi:</label>
+                                        <input type="number" id="productMinStockMobile" value="5" min="1">
                                     </div>
                                     <button type="submit" class="btn-success btn-large">
                                         <i class="fas fa-check"></i> Ürünü Kaydet
@@ -605,7 +612,7 @@
                             <div class="status-header">
                                 <h3>Kasa Durumu</h3>
                                 <div class="status-indicator">
-                                    <i class="fas fa-lock"></i>
+                                    <i class="fas fa-lock" id="cashStatusIcon"></i>
                                     <span id="cashStatusText">Kapalı</span>
                                 </div>
                             </div>
@@ -711,7 +718,7 @@
                                             <td colspan="5" class="empty-state">
                                                 <i class="fas fa-users"></i>
                                                 <p>Kullanıcı yükleniyor...</p>
-                                            </td>
+                                        </td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -828,7 +835,7 @@
                 </div>
                 <div class="form-group">
                     <label>Gerçek Nakit Miktarı (TL):</label>
-                    <input type="number" id="closingBalanceInput" step="0.01" min="0">
+                    <input type="number" id="closingBalanceInput" step="0.01" min="0" oninput="calculateCashDifference()">
                 </div>
                 <div class="difference-info">
                     <span>Fark: </span>
@@ -850,7 +857,7 @@
                 <span class="close" onclick="closeModal('addProductModal')">&times;</span>
             </div>
             <div class="modal-body">
-                <form onsubmit="addNewProduct(event)">
+                <form id="addProductForm" onsubmit="addNewProduct(event)">
                     <div class="form-group">
                         <label>Barkod:</label>
                         <input type="text" id="newProductBarcode" required placeholder="Barkod numarası">
@@ -883,11 +890,11 @@
                         <label>Min. Stok Seviyesi:</label>
                         <input type="number" id="newProductMinStock" value="5" min="1">
                     </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn-secondary" onclick="closeModal('addProductModal')">İptal</button>
+                        <button type="submit" class="btn-success">Ürünü Kaydet</button>
+                    </div>
                 </form>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeModal('addProductModal')">İptal</button>
-                <button class="btn-success" onclick="addNewProduct()">Ürünü Kaydet</button>
             </div>
         </div>
     </div>
@@ -900,7 +907,7 @@
                 <span class="close" onclick="closeModal('addUserModal')">&times;</span>
             </div>
             <div class="modal-body">
-                <form onsubmit="createNewUser(event)">
+                <form id="addUserForm" onsubmit="createNewUser(event)">
                     <div class="form-group">
                         <label>Kullanıcı Adı:</label>
                         <input type="text" id="newUsername" required placeholder="Kullanıcı adı">
@@ -925,11 +932,11 @@
                             <option value="cashier">Kasiyer</option>
                         </select>
                     </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn-secondary" onclick="closeModal('addUserModal')">İptal</button>
+                        <button type="submit" class="btn-success">Kullanıcıyı Kaydet</button>
+                    </div>
                 </form>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="closeModal('addUserModal')">İptal</button>
-                <button class="btn-success" onclick="createNewUser()">Kullanıcıyı Kaydet</button>
             </div>
         </div>
     </div>
