@@ -1,4 +1,4 @@
 #!/bin/bash
-echo "🚀 Build başlıyor..."
+echo " Build başlıyor..."
 pip install -r requirements.txt
-echo "✅ Build tamamlandı!"
+echo " Build tamamlandı!"
