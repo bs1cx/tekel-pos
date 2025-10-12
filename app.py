@@ -23,7 +23,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('tekel_pos.log'),
         logging.StreamHandler()
     ]
 )
@@ -36,7 +35,9 @@ app = Flask(__name__,
 
 # Güvenli secret key
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-socketio = SocketIO(app, cors_allowed_origins=os.environ.get('ALLOWED_ORIGINS', '*'))
+socketio = SocketIO(app, 
+                   cors_allowed_origins=os.environ.get('ALLOWED_ORIGINS', '*'),
+                   async_mode='threading')
 
 # PostgreSQL connection pool
 db_pool = None
@@ -45,49 +46,99 @@ def init_db_pool():
     """Veritabanı connection pool'u başlat"""
     global db_pool
     try:
-        database_url = "postgres://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x"
-        if not database_url:
-            raise ValueError("DATABASE_URL environment variable is not set")
+        # Vercel environment variable kullan
+        database_url = os.environ.get('DATABASE_URL')
         
+        if not database_url:
+            # Fallback olarak Supabase connection string (düzeltilmiş)
+            database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+        
+        logger.info(f"Connecting to database: {database_url.split('@')[1] if '@' in database_url else database_url}")
+        
+        # Connection pool oluştur
         db_pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=1,
-            maxconn=20,
+            maxconn=10,  # Vercel'de daha düşük limit
             dsn=database_url,
             cursor_factory=RealDictCursor
         )
         logger.info("Database connection pool initialized successfully")
     except Exception as e:
         logger.error(f"Database pool initialization error: {e}")
-        raise
+        # Fallback: basit connection
+        try:
+            # Pool olmadan direkt bağlantı dene
+            conn = psycopg2.connect(
+                database_url,
+                cursor_factory=RealDictCursor
+            )
+            conn.close()
+            db_pool = None
+            logger.info("Using direct connections instead of pool")
+        except Exception as fallback_error:
+            logger.error(f"Fallback also failed: {fallback_error}")
+            raise
 
 def get_db_connection():
     """Connection pool'dan bağlantı al"""
     global db_pool
-    if db_pool is None:
-        init_db_pool()
+    max_retries = 3
+    retry_delay = 1
     
-    try:
-        conn = db_pool.getconn()
-        return conn
-    except Exception as e:
-        logger.error(f"Get connection error: {e}")
-        raise
+    for attempt in range(max_retries):
+        try:
+            if db_pool is None:
+                init_db_pool()
+            
+            # Pool kullanılıyorsa
+            if db_pool:
+                conn = db_pool.getconn()
+                # Bağlantıyı test et
+                cursor = conn.cursor()
+                cursor.execute('SELECT 1')
+                cursor.close()
+                return conn
+            else:
+                # Pool yoksa direkt bağlantı
+                database_url = os.environ.get('DATABASE_URL') or "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+                conn = psycopg2.connect(
+                    database_url,
+                    cursor_factory=RealDictCursor
+                )
+                return conn
+                
+        except Exception as e:
+            logger.error(f"Get connection attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                # Pool'u sıfırla
+                db_pool = None
+            else:
+                raise
 
 def release_db_connection(conn):
     """Bağlantıyı pool'a geri ver"""
     global db_pool
-    if db_pool and conn:
-        try:
+    try:
+        if db_pool and conn:
             db_pool.putconn(conn)
-        except Exception as e:
-            logger.error(f"Release connection error: {e}")
+    except Exception as e:
+        logger.error(f"Release connection error: {e}")
+        # Hata durumunda bağlantıyı kapat
+        try:
+            conn.close()
+        except:
+            pass
 
 def close_db_pool():
     """Connection pool'u kapat"""
     global db_pool
     if db_pool:
-        db_pool.closeall()
-        logger.info("Database connection pool closed")
+        try:
+            db_pool.closeall()
+            logger.info("Database connection pool closed")
+        except Exception as e:
+            logger.error(f"Close pool error: {e}")
 
 # Decorator'lar
 def require_auth(f):
@@ -909,6 +960,8 @@ def close_cash(cursor):
 @app.route('/api/cash/transactions')
 @require_auth
 def cash_transactions():
+    conn = None
+    cursor = None
     try:
         limit = request.args.get('limit', 50, type=int)
         
@@ -1481,17 +1534,27 @@ def handle_exception(error):
     }), 500
 
 # Uygulama başlatma
-if __name__ == '__main__':
-    # Veritabanını başlat
-    init_db()
+def create_app():
+    """Uygulama factory function for Vercel"""
+    try:
+        # Veritabanını başlat
+        init_db()
+        logger.info("Application started successfully")
+    except Exception as e:
+        logger.error(f"Application startup error: {e}")
+        # Hata durumunda bile uygulamanın çalışmaya devam etmesi için
+        pass
     
-    # Port ayarı (Vercel için gerekli)
-    port = int(os.environ.get('PORT', 5000))
-    socketio.run(app, host='0.0.0.0', port=port, debug=False)
-else:
-    # Vercel'de çalışırken veritabanını başlat
-    init_db()
+    return app
+
+# Vercel için gerekli
+app = create_app()
 
 # Uygulama kapanırken pool'u temizle
 import atexit
 atexit.register(close_db_pool)
+
+# Yerel çalıştırma için
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host='0.0.0.0', port=port, debug=False)
