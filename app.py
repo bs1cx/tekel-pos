@@ -45,7 +45,7 @@ def init_db_pool():
     """Veritabanı connection pool'u başlat"""
     global db_pool
     try:
-        database_url = os.environ.get('DATABASE_URL')
+        database_url = "postgres://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require&supa=base-pooler.x"
         if not database_url:
             raise ValueError("DATABASE_URL environment variable is not set")
         
