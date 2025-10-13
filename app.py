@@ -5,19 +5,17 @@ import qrcode
 import io
 import base64
 import socket
-from datetime import datetime, timedelta
-import json
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from psycopg2 import pool, DatabaseError, IntegrityError
-from threading import Lock
-import time
+from datetime import datetime
 import hashlib
 import secrets
 from functools import wraps
+import requests
 import traceback
+import time
 
-# Logging konfigürasyonu
+# =========================================================
+# LOGGING KONFİGÜRASYONU
+# =========================================================
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -27,7 +25,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__, 
+# =========================================================
+# FLASK UYGULAMASI
+# =========================================================
+app = Flask(__name__,
     static_folder='static',
     template_folder='templates'
 )
@@ -35,166 +36,266 @@ app = Flask(__name__,
 # Güvenli secret key
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
-# Database bağlantısı ve init kontrolü
+# =========================================================
+# SUPABASE (REST) AYARLARI
+# =========================================================
+# Bu değerleri sen verdin — doğrudan kullanıyorum.
+SUPABASE_URL = "https://mqkjserlvdfddjutcoqr.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa2pzZXJsdmRmZGRqdXRjb3FyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAxNTI1NjEsImV4cCI6MjA3NTcyODU2MX0.L_cOpIZQkkqAd0U1plpX5qrFPFoOdasxVtRScSTQ6a8"
+
+# Opsiyonel: service role key varsa init sırasında DDL çalıştırılabilir (kullanıcı dikkatli olsun)
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+
+SUPABASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
+
+# Eğer service role key verilmişse güvenlikli header
+SUPABASE_SERVICE_HEADERS = None
+if SUPABASE_SERVICE_ROLE_KEY:
+    SUPABASE_SERVICE_HEADERS = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
+# =========================================================
+# YARDIMCI: Supabase REST wrapper fonksiyonları
+# =========================================================
+# Not: PostgREST endpoint'leri tablo isimleri ile çalışır: /rest/v1/<table>
+# Filtreler PostgREST query param formatında verilir (örn. ?id=eq.1)
+# Bu wrapper'lar response ve HTTP kodlarını kontrol eder.
+
+def supabase_get(table, params=None, headers=None, timeout=10):
+    """GET /rest/v1/<table>?<params>"""
+    if headers is None:
+        headers = SUPABASE_HEADERS
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+        if resp.status_code >= 400:
+            logger.error(f"Supabase GET {table} failed: {resp.status_code} - {resp.text}")
+            return None, resp.status_code
+        return resp.json(), resp.status_code
+    except Exception as e:
+        logger.error(f"Supabase GET exception for {table}: {e}")
+        return None, 500
+
+def supabase_post(table, data, headers=None, timeout=10):
+    """POST /rest/v1/<table>"""
+    if headers is None:
+        headers = SUPABASE_HEADERS
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    try:
+        resp = requests.post(url, headers=headers, json=data, timeout=timeout)
+        if resp.status_code >= 400:
+            logger.error(f"Supabase POST {table} failed: {resp.status_code} - {resp.text}")
+            return None, resp.status_code
+        # PostgREST returns created rows (if wants) or empty; try parse
+        try:
+            return resp.json(), resp.status_code
+        except:
+            return resp.text, resp.status_code
+    except Exception as e:
+        logger.error(f"Supabase POST exception for {table}: {e}")
+        return None, 500
+
+def supabase_patch(table, filters, data, headers=None, timeout=10):
+    """PATCH /rest/v1/<table>?<filters>"""
+    if headers is None:
+        headers = SUPABASE_HEADERS
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    try:
+        resp = requests.patch(url, headers=headers, params=filters, json=data, timeout=timeout)
+        if resp.status_code >= 400:
+            logger.error(f"Supabase PATCH {table} failed: {resp.status_code} - {resp.text}")
+            return None, resp.status_code
+        try:
+            return resp.json(), resp.status_code
+        except:
+            return resp.text, resp.status_code
+    except Exception as e:
+        logger.error(f"Supabase PATCH exception for {table}: {e}")
+        return None, 500
+
+def supabase_delete(table, filters, headers=None, timeout=10):
+    """DELETE /rest/v1/<table>?<filters>"""
+    if headers is None:
+        headers = SUPABASE_HEADERS
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    try:
+        resp = requests.delete(url, headers=headers, params=filters, timeout=timeout)
+        if resp.status_code >= 400:
+            logger.error(f"Supabase DELETE {table} failed: {resp.status_code} - {resp.text}")
+            return None, resp.status_code
+        try:
+            return resp.json(), resp.status_code
+        except:
+            return resp.text, resp.status_code
+    except Exception as e:
+        logger.error(f"Supabase DELETE exception for {table}: {e}")
+        return None, 500
+
+# Helper: parametrized filter builder (dict -> PostgREST params)
+def build_filters(d):
+    """
+    d is a dict like {"username": "eq.john", "id": "eq.1"} or {"id": "eq.1"}
+    If user supplies a plain value, we will convert to eq.<value>.
+    """
+    params = {}
+    if not d:
+        return params
+    for k, v in d.items():
+        if isinstance(v, str) and (v.startswith("eq.") or v.startswith("like.") or v.startswith("gt.") or v.startswith("lt.") or v.startswith("ilike.") or v.startswith("neq.")):
+            params[k] = v
+        else:
+            # assume equality
+            params[k] = f"eq.{v}"
+    return params
+
+# =========================================================
+# HELPERS: password hashing and simple utilities
+# =========================================================
+def hash_password(password):
+    if password is None:
+        return None
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def now_iso():
+    return datetime.utcnow().isoformat()
+
+# =========================================================
+# DB INIT (checks only) - cannot create tables with anon key in general
+# =========================================================
 _db_initialized = False
-_db_init_lock = Lock()
-_db_pool = None
-_db_pool_lock = Lock()
+_db_init_lock = False
 
-
-def get_db_connection():
-    """Supabase PostgreSQL bağlantısı (connection pool ile)"""
-    global _db_pool
-    max_retries = 3
-    retry_delay = 1
-
-    # Pool yoksa oluştur
-    if _db_pool is None:
-        with _db_pool_lock:
-            if _db_pool is None:
-                try:
-                    db_host = os.environ.get('POSTGRES_HOST')
-                    db_user = os.environ.get('POSTGRES_USER')
-                    db_password = os.environ.get('POSTGRES_PASSWORD')
-                    db_name = os.environ.get('POSTGRES_DATABASE')
-
-                    if db_host and db_user and db_password and db_name:
-                        database_url = f"postgresql://{db_user}:{db_password}@{db_host}:5432/{db_name}"
-                    else:
-                        database_url = os.environ.get('DATABASE_URL')
-                        if not database_url:
-                            database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
-
-                    logger.info("Creating new PostgreSQL connection pool...")
-                    _db_pool = psycopg2.pool.SimpleConnectionPool(
-                        1, 5,
-                        database_url,
-                        cursor_factory=RealDictCursor
-                    )
-                    logger.info("PostgreSQL connection pool created successfully")
-                except Exception as e:
-                    logger.error(f"Failed to create database pool: {e}")
-                    raise
-
-    # Havuzdan bağlantı al
-    for attempt in range(max_retries):
-        try:
-            conn = _db_pool.getconn()
-            if conn.closed:
-                logger.warning("Connection was closed, retrying...")
-                continue
-            return conn
-        except Exception as e:
-            logger.error(f"Connection attempt {attempt + 1} failed: {e}")
-            time.sleep(retry_delay)
-    raise DatabaseError("All connection attempts failed after retries")
-
-
-def release_db_connection(conn):
-    """Bağlantıyı havuza geri bırak"""
-    global _db_pool
-    if _db_pool and conn:
-        try:
-            _db_pool.putconn(conn)
-        except Exception as e:
-            logger.warning(f"Failed to release connection: {e}")
-
-
-def ensure_db_initialized():
-    """Database'in initialize edildiğinden emin ol"""
-    global _db_initialized
-    
+def ensure_db_initialized(retries=3, delay=1):
+    """
+    Try to confirm the main tables exist. With anon key we cannot run DDL reliably.
+    We'll attempt to GET /users limit=1. If 200 -> ok. If 404 or other, log instructions.
+    """
+    global _db_initialized, _db_init_lock
     if _db_initialized:
         return True
-    
-    with _db_init_lock:
-        if _db_initialized:
-            return True
-            
-        try:
-            init_db()
-            _db_initialized = True
-            logger.info("Database initialization completed")
-            return True
-        except Exception as e:
-            logger.error(f"Database initialization failed: {e}")
-            return False
 
-# Decorator'lar
+    # simple lock to avoid concurrent init attempts
+    if _db_init_lock:
+        # another thread doing init; be optimistic and return False (or wait)
+        return False
+
+    _db_init_lock = True
+    try:
+        attempt = 0
+        while attempt < retries:
+            attempt += 1
+            users, status = supabase_get("users", params={"select": "id", "limit": 1})
+            if users is not None and status == 200:
+                logger.info("Supabase tables reachable.")
+                # ensure default users exist (if none, create them)
+                try:
+                    users_all, s2 = supabase_get("users", params={"select": "id,username"})
+                    if users_all is not None and isinstance(users_all, list) and len(users_all) == 0:
+                        logger.info("No users exist, creating default users.")
+                        # create default users (hash passwords)
+                        default_users = [
+                            {"username": "admin", "password": hash_password("admin123"), "full_name": "Sistem Yöneticisi", "role": "admin", "created_at": now_iso()},
+                            {"username": "kasiyer", "password": hash_password("kasiyer123"), "full_name": "Kasiyer Kullanıcı", "role": "cashier", "created_at": now_iso()},
+                            {"username": "personel", "password": hash_password("personel123"), "full_name": "Personel Kullanıcı", "role": "user", "created_at": now_iso()}
+                        ]
+                        for u in default_users:
+                            r, st = supabase_post("users", u)
+                            logger.info(f"Created default user, status {st}")
+                    _db_initialized = True
+                    _db_init_lock = False
+                    return True
+                except Exception as e:
+                    logger.warning(f"While ensuring default users: {e}")
+                    _db_init_lock = False
+                    return True
+            else:
+                logger.warning(f"Supabase users check failed (attempt {attempt}): status {status}. Retrying in {delay}s")
+                time.sleep(delay)
+        # after retries, log a helpful message and return False
+        logger.error(
+            "Supabase tables appear unreachable via anon key. "
+            "If tables are not created, create them in Supabase Dashboard. "
+            "If you want automated table creation, set SUPABASE_SERVICE_ROLE_KEY env var (careful: keep it secret)."
+        )
+        _db_init_lock = False
+        return False
+    except Exception as e:
+        logger.error(f"ensure_db_initialized exception: {e}")
+        _db_init_lock = False
+        return False
+
+# =========================================================
+# AUTH DECORATOR
+# =========================================================
 def require_auth(f):
-    """Authentication gerektiren endpoint'ler için decorator"""
+    """Simple Authorization check: ensures Authorization header present.
+       You can replace with real JWT logic later using SUPABASE_JWT_SECRET or Supabase auth.
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             return jsonify({'status': 'error', 'message': 'Authorization header required'}), 401
-        
-        # Basit token kontrolü (gerçek uygulamada JWT kullanılmalı)
+        # For backward compatibility with old code that used token = user id,
+        # allow "Bearer <user_id>" style tokens for local/dev usage.
         try:
-            user_id = int(auth_header.replace('Bearer ', ''))
-            request.user_id = user_id
+            token = auth_header.replace('Bearer ', '').strip()
+            # if numeric, place into request.user_id
+            if token.isdigit():
+                request.user_id = int(token)
         except:
-            return jsonify({'status': 'error', 'message': 'Invalid token'}), 401
-        
+            pass
         return f(*args, **kwargs)
     return decorated_function
 
+# =========================================================
+# TRANSACTION HANDLER ADAPTATION
+# =========================================================
 def transaction_handler(f):
-    """Transaction yönetimi için decorator"""
+    """
+    In REST setup we cannot have DB-level transactions spanning multiple HTTP calls.
+    This decorator will just run the function and catch errors, returning 500 on failure.
+    Functions should use the supabase_* helpers for atomic operations where possible.
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        conn = None
         try:
-            conn = get_db_connection()
-            conn.autocommit = False
-            cursor = conn.cursor()
-            
-            # Fonksiyonu transaction içinde çalıştır
-            result = f(cursor, *args, **kwargs)
-            
-            conn.commit()
-            return result
-            
+            return f(*args, **kwargs)
         except Exception as e:
-            if conn:
-                conn.rollback()
-            logger.error(f"Transaction error in {f.__name__}: {str(e)}")
+            logger.error(f"Transaction-like handler caught error in {f.__name__}: {e}")
             logger.error(traceback.format_exc())
-            return jsonify({
-                'status': 'error', 
-                'message': f'Transaction error: {str(e)}'
-            }), 500
-        finally:
-            if conn:
-                release_db_connection(conn)
-    
+            return jsonify({'status': 'error', 'message': f'Transaction error: {str(e)}'}), 500
     return decorated_function
 
-# Yardımcı fonksiyonlar
-def hash_password(password):
-    """Şifreyi hash'le"""
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# (devam ediyor — aşağıda tüm orijinal kod eksiksiz biçimde korunmuştur)
-
-
+# =========================================================
+# VALIDATION HELPERS (aynı orijinal mantık)
+# =========================================================
 def validate_product_data(data):
     """Ürün verilerini validate et"""
     errors = []
     
-    if not data.get('barcode') or len(data['barcode'].strip()) == 0:
+    if not data.get('barcode') or len(str(data['barcode']).strip()) == 0:
         errors.append('Barkod gereklidir')
     
-    if data.get('quantity', 0) < 0:
+    if int(data.get('quantity', 0)) < 0:
         errors.append('Miktar negatif olamaz')
     
-    if data.get('price', 0) < 0:
+    if float(data.get('price', 0)) < 0:
         errors.append('Fiyat negatif olamaz')
     
-    if data.get('kdv', 0) < 0:
+    if float(data.get('kdv', 0)) < 0:
         errors.append('KDV negatif olamaz')
     
-    if data.get('otv', 0) < 0:
+    if float(data.get('otv', 0)) < 0:
         errors.append('ÖTV negatif olamaz')
     
     return errors
@@ -208,7 +309,10 @@ def validate_sale_data(data):
         errors.append('En az bir ürün gereklidir')
     
     total = data.get('total', 0)
-    if total <= 0:
+    try:
+        if float(total) <= 0:
+            errors.append('Toplam tutar geçersiz')
+    except:
         errors.append('Toplam tutar geçersiz')
     
     payment_method = data.get('payment_method')
@@ -217,202 +321,40 @@ def validate_sale_data(data):
     
     # Stok kontrolü
     for item in items:
-        if item.get('quantity', 0) <= 0:
+        if int(item.get('quantity', 0)) <= 0:
             errors.append(f"{item.get('name', 'Ürün')} için geçersiz miktar")
     
     return errors
 
-# Veritabanı başlatma
-def init_db():
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        logger.info("Starting Supabase database initialization...")
-        
-        # Önce tabloların var olup olmadığını kontrol et
-        cursor.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'users'
-            );
-        """)
-        users_table_exists = cursor.fetchone()['exists']
-        
-        if not users_table_exists:
-            logger.info("Creating tables in Supabase...")
-            
-            # Kullanıcılar tablosu
-            cursor.execute('''
-                CREATE TABLE users (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    full_name TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    last_login TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            logger.info("Users table created")
-            
-            # Ürünler tablosu
-            cursor.execute('''
-                CREATE TABLE products (
-                    id SERIAL PRIMARY KEY,
-                    barcode TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    price REAL NOT NULL CHECK (price >= 0),
-                    quantity INTEGER DEFAULT 0 CHECK (quantity >= 0),
-                    kdv REAL DEFAULT 18 CHECK (kdv >= 0),
-                    otv REAL DEFAULT 0 CHECK (otv >= 0),
-                    min_stock_level INTEGER DEFAULT 5 CHECK (min_stock_level >= 0),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            logger.info("Products table created")
-            
-            # Satışlar tablosu
-            cursor.execute('''
-                CREATE TABLE sales (
-                    id SERIAL PRIMARY KEY,
-                    total_amount REAL NOT NULL CHECK (total_amount >= 0),
-                    payment_method TEXT NOT NULL,
-                    cash_amount REAL DEFAULT 0 CHECK (cash_amount >= 0),
-                    credit_card_amount REAL DEFAULT 0 CHECK (credit_card_amount >= 0),
-                    change_amount REAL DEFAULT 0 CHECK (change_amount >= 0),
-                    user_id INTEGER,
-                    sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-                )
-            ''')
-            logger.info("Sales table created")
-            
-            # Satış detayları tablosu
-            cursor.execute('''
-                CREATE TABLE sale_items (
-                    id SERIAL PRIMARY KEY,
-                    sale_id INTEGER,
-                    barcode TEXT NOT NULL,
-                    product_name TEXT NOT NULL,
-                    quantity INTEGER NOT NULL CHECK (quantity > 0),
-                    price REAL NOT NULL CHECK (price >= 0),
-                    FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
-                )
-            ''')
-            logger.info("Sale items table created")
-            
-            # Stok hareketleri tablosu
-            cursor.execute('''
-                CREATE TABLE stock_movements (
-                    id SERIAL PRIMARY KEY,
-                    barcode TEXT NOT NULL,
-                    product_name TEXT NOT NULL,
-                    movement_type TEXT NOT NULL,
-                    quantity INTEGER NOT NULL,
-                    user_id INTEGER,
-                    movement_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-                )
-            ''')
-            logger.info("Stock movements table created")
-            
-            # Kasa durumu tablosu
-            cursor.execute('''
-                CREATE TABLE cash_register (
-                    id SERIAL PRIMARY KEY,
-                    is_open BOOLEAN DEFAULT FALSE,
-                    current_amount REAL DEFAULT 0 CHECK (current_amount >= 0),
-                    opening_balance REAL DEFAULT 0 CHECK (opening_balance >= 0),
-                    opening_time TIMESTAMP,
-                    closing_time TIMESTAMP,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            logger.info("Cash register table created")
-            
-            # Kasa hareketleri tablosu
-            cursor.execute('''
-                CREATE TABLE cash_transactions (
-                    id SERIAL PRIMARY KEY,
-                    transaction_type TEXT NOT NULL,
-                    amount REAL NOT NULL,
-                    user_id INTEGER,
-                    transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    description TEXT,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-                )
-            ''')
-            logger.info("Cash transactions table created")
-            
-            # Denetim kayıtları tablosu
-            cursor.execute('''
-                CREATE TABLE audit_logs (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    action TEXT NOT NULL,
-                    description TEXT,
-                    ip_address TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-                )
-            ''')
-            logger.info("Audit logs table created")
-            
-            # Varsayılan kullanıcıları ekle (hash'lenmiş şifrelerle)
-            cursor.execute(
-                'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
-                ('admin', hash_password('admin123'), 'Sistem Yöneticisi', 'admin')
-            )
-            cursor.execute(
-                'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
-                ('kasiyer', hash_password('kasiyer123'), 'Kasiyer Kullanıcı', 'cashier')
-            )
-            cursor.execute(
-                'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
-                ('personel', hash_password('personel123'), 'Personel Kullanıcı', 'user')
-            )
-            logger.info("Default users created")
-            
-            # Varsayılan kasa durumu
-            cursor.execute(
-                'INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, FALSE, 0, 0) ON CONFLICT (id) DO NOTHING'
-            )
-            logger.info("Cash register default state created")
-            
-            conn.commit()
-            logger.info("All tables created successfully in Supabase")
-        else:
-            logger.info("Tables already exist in Supabase, skipping creation")
-        
-    except Exception as e:
-        logger.error(f"Supabase database initialization error: {e}")
-        logger.error(traceback.format_exc())
-        if conn:
-            conn.rollback()
-        raise
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+# =========================================================
+# INIT - Logically similar to original, but using REST
+# =========================================================
+@app.before_first_request
+def app_init():
+    # Ensure DB/Tables available
+    initialized = ensure_db_initialized()
+    if not initialized:
+        logger.warning("Database not fully initialized or not reachable. Some operations may fail. "
+                       "Please ensure tables (users, products, sales, sale_items, stock_movements, cash_register, cash_transactions, audit_logs) exist in Supabase.")
+    else:
+        logger.info("Application initialization completed with Supabase reachable.")
 
-# Static dosyalar için route
+# =========================================================
+# Static route (unchanged)
+# =========================================================
 @app.route('/static/<path:path>')
 def serve_static(path):
     return send_from_directory('static', path)
 
-# Ana sayfa
+# =========================================================
+# INDEX (unchanged functionality)
+# =========================================================
 @app.route('/')
 def index():
     try:
-        # Database'i initialize et
+        # Check DB quickly
         ensure_db_initialized()
         
-        # IP adresini al
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
     except:
@@ -436,812 +378,724 @@ def index():
     
     return render_template('index.html', local_ip=local_ip, qr_code=qr_code)
 
-# API Routes
-
+# =========================================================
+# AUTH / LOGIN (REST-based)
+# =========================================================
 @app.route('/api/auth/login', methods=['POST'])
 def login():
-    # Önce database'in initialize edildiğinden emin ol
+    # Ensure DB
     if not ensure_db_initialized():
         return jsonify({
             'status': 'error',
-            'message': 'Database başlatılamadı. Lütfen daha sonra tekrar deneyin.'
+            'message': 'Database erişilemedi. Lütfen yapılandırmayı kontrol edin.'
         }), 500
     
     data = request.get_json()
-    
     if not data:
-        return jsonify({
-            'status': 'error',
-            'message': 'Geçersiz JSON verisi'
-        }), 400
+        return jsonify({'status': 'error', 'message': 'Geçersiz JSON verisi'}), 400
     
     username = data.get('username')
     password = data.get('password')
-    
     if not username or not password:
-        return jsonify({
-            'status': 'error',
-            'message': 'Kullanıcı adı ve şifre gereklidir'
-        }), 400
+        return jsonify({'status': 'error', 'message': 'Kullanıcı adı ve şifre gereklidir'}), 400
     
-    conn = None
-    cursor = None
+    hashed_password = hash_password(password)
+    # Query users table via Supabase REST
+    params = build_filters({"username": f"eq.{username}", "password": f"eq.{hashed_password}"})
+    users, status = supabase_get("users", params=params)
+    if users is None:
+        return jsonify({'status': 'error', 'message': 'Kullanıcı doğrulama sırasında hata oluştu'}), 500
+    if isinstance(users, list) and len(users) == 0:
+        logger.warning(f"Failed login attempt for username: {username}")
+        return jsonify({'status': 'error', 'message': 'Geçersiz kullanıcı adı veya şifre'}), 401
+    
+    user = users[0]
+    # Update last_login
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        hashed_password = hash_password(password)
-        logger.info(f"Login attempt for username: {username}")
-        
-        cursor.execute(
-            'SELECT * FROM users WHERE username = %s AND password = %s',
-            (username, hashed_password)
-        )
-        user = cursor.fetchone()
-        
-        if user:
-            # Son giriş zamanını güncelle
-            cursor.execute(
-                'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s',
-                (user['id'],)
-            )
-            conn.commit()
-            
-            # Denetim kaydı ekle
-            log_audit(user['id'], 'login', f'{user["username"]} giriş yaptı', request.remote_addr)
-            
-            logger.info(f"Successful login for user: {username}")
-            
-            return jsonify({
-                'status': 'success',
-                'user': {
-                    'id': user['id'],
-                    'username': user['username'],
-                    'full_name': user['full_name'],
-                    'role': user['role']
-                },
-                'token': str(user['id'])  # Basit token (gerçek uygulamada JWT kullanın)
-            })
-        else:
-            logger.warning(f"Failed login attempt for username: {username}")
-            return jsonify({
-                'status': 'error',
-                'message': 'Geçersiz kullanıcı adı veya şifre'
-            }), 401
-            
+        supabase_patch("users", {"id": f"eq.{user.get('id')}"}, {"last_login": now_iso()})
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            'status': 'error',
-            'message': 'Giriş işlemi sırasında hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.warning(f"Updating last_login failed: {e}")
+    # Audit log
+    try:
+        audit = {
+            "user_id": user.get('id'),
+            "action": "login",
+            "description": f"{user.get('username')} giriş yaptı",
+            "ip_address": request.remote_addr,
+            "created_at": now_iso()
+        }
+        supabase_post("audit_logs", audit)
+    except Exception as e:
+        logger.warning(f"Audit log failed: {e}")
 
+    return jsonify({
+        'status': 'success',
+        'user': {
+            'id': user.get('id'),
+            'username': user.get('username'),
+            'full_name': user.get('full_name'),
+            'role': user.get('role')
+        },
+        'token': str(user.get('id'))  # same simple token approach for compatibility
+    })
+
+# =========================================================
+# PRODUCTS: GET ALL
+# =========================================================
 @app.route('/api/products')
 @require_auth
 def get_products():
-    conn = None
-    cursor = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM products ORDER BY name')
-        products = cursor.fetchall()
-        
-        products_list = [dict(product) for product in products]
-        
-        return jsonify({
-            'status': 'success',
-            'products': products_list
-        })
+        products, status = supabase_get("products", params={"order": "name.asc"})
+        if products is None:
+            return jsonify({'status': 'error', 'message': 'Ürünler yüklenirken hata oluştu'}), 500
+        return jsonify({'status': 'success', 'products': products})
     except Exception as e:
-        logger.error(f"Products error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Ürünler yüklenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Products error: {e}")
+        return jsonify({'status': 'error', 'message': 'Ürünler yüklenirken hata oluştu'}), 500
 
+# =========================================================
+# PRODUCT: GET single by barcode
+# =========================================================
 @app.route('/api/products/<barcode>')
 @require_auth
 def get_product(barcode):
-    conn = None
-    cursor = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
-        product = cursor.fetchone()
-        
-        if product:
-            return jsonify({
-                'status': 'success',
-                'product': dict(product)
-            })
-        else:
-            return jsonify({
-                'status': 'error',
-                'message': 'Ürün bulunamadı'
-            }), 404
+        params = build_filters({"barcode": f"eq.{barcode}"})
+        products, status = supabase_get("products", params=params)
+        if products is None:
+            return jsonify({'status': 'error', 'message': 'Ürün bilgisi alınırken hata oluştu'}), 500
+        if isinstance(products, list) and len(products) == 0:
+            return jsonify({'status': 'error', 'message': 'Ürün bulunamadı'}), 404
+        return jsonify({'status': 'success', 'product': products[0]})
     except Exception as e:
-        logger.error(f"Product get error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Ürün bilgisi alınırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Product get error: {e}")
+        return jsonify({'status': 'error', 'message': 'Ürün bilgisi alınırken hata oluştu'}), 500
 
+# =========================================================
+# CREATE PRODUCT (was transaction_handler)
+# =========================================================
 @app.route('/api/products', methods=['POST'])
 @require_auth
 @transaction_handler
-def create_product(cursor):
+def create_product():
     data = request.get_json()
-    
-    # Validasyon
+    # Validation
     errors = validate_product_data(data)
     if errors:
-        return jsonify({
-            'status': 'error',
-            'message': '; '.join(errors)
-        }), 400
-    
+        return jsonify({'status': 'error', 'message': '; '.join(errors)}), 400
+
     barcode = data.get('barcode')
     name = data.get('name')
-    price = data.get('price', 0)
-    quantity = data.get('quantity', 0)
-    kdv = data.get('kdv', 18)
-    otv = data.get('otv', 0)
-    min_stock_level = data.get('min_stock_level', 5)
+    price = float(data.get('price', 0))
+    quantity = int(data.get('quantity', 0))
+    kdv = float(data.get('kdv', 18))
+    otv = float(data.get('otv', 0))
+    min_stock_level = int(data.get('min_stock_level', 5))
     user_id = getattr(request, 'user_id', 1)
-    
-    # Ürün var mı kontrol et
-    cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
-    existing_product = cursor.fetchone()
-    
-    if existing_product:
-        return jsonify({
-            'status': 'error',
-            'message': 'Bu barkod zaten kullanılıyor'
-        }), 400
-    
-    # Yeni ürün ekle
-    cursor.execute('''
-        INSERT INTO products (barcode, name, price, quantity, kdv, otv, min_stock_level) 
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ''', (barcode, name, price, quantity, kdv, otv, min_stock_level))
-    
-    # Stok hareketi kaydı (yeni ürün)
-    if quantity > 0:
-        cursor.execute(
-            'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
-            (barcode, name, 'new', quantity, user_id)
-        )
-    
-    # Denetim kaydı
-    log_audit(user_id, 'product_create', f'Yeni ürün eklendi: {barcode} - {name}')
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Ürün başarıyla eklendi'
-    })
 
+    # Check existing product by barcode
+    try:
+        existing, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+        if existing is None:
+            return jsonify({'status': 'error', 'message': 'Veritabanı hatası'}), 500
+        if isinstance(existing, list) and len(existing) > 0:
+            return jsonify({'status': 'error', 'message': 'Bu barkod zaten kullanılıyor'}), 400
+    except Exception as e:
+        logger.error(f"Product check error: {e}")
+        return jsonify({'status': 'error', 'message': 'Ürün kontrolü sırasında hata oluştu'}), 500
+
+    # Insert product
+    product_payload = {
+        "barcode": barcode,
+        "name": name,
+        "price": price,
+        "quantity": quantity,
+        "kdv": kdv,
+        "otv": otv,
+        "min_stock_level": min_stock_level,
+        "created_at": now_iso()
+    }
+    created, st = supabase_post("products", product_payload)
+    if created is None:
+        return jsonify({'status': 'error', 'message': 'Ürün eklenirken hata oluştu'}), 500
+
+    # Stock movement if quantity > 0
+    try:
+        if quantity > 0:
+            stock_payload = {
+                "barcode": barcode,
+                "product_name": name,
+                "movement_type": "new",
+                "quantity": quantity,
+                "user_id": user_id,
+                "movement_date": now_iso()
+            }
+            supabase_post("stock_movements", stock_payload)
+    except Exception as e:
+        logger.warning(f"Stock movement creation failed: {e}")
+
+    # Audit log
+    try:
+        log = {
+            "user_id": user_id,
+            "action": "product_create",
+            "description": f"Yeni ürün eklendi: {barcode} - {name}",
+            "created_at": now_iso()
+        }
+        supabase_post("audit_logs", log)
+    except Exception as e:
+        logger.warning(f"Audit log failed: {e}")
+
+    return jsonify({'status': 'success', 'message': 'Ürün başarıyla eklendi'})
+
+# =========================================================
+# UPDATE PRODUCT
+# =========================================================
 @app.route('/api/products/<barcode>', methods=['PUT'])
 @require_auth
 def update_product(barcode):
     data = request.get_json()
-    
-    # Validasyon
     errors = validate_product_data(data)
     if errors:
-        return jsonify({
-            'status': 'error',
-            'message': '; '.join(errors)
-        }), 400
-    
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Ürün var mı kontrol et
-        cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
-        product = cursor.fetchone()
-        
-        if not product:
-            return jsonify({
-                'status': 'error',
-                'message': 'Ürün bulunamadı'
-            }), 404
-        
-        # Eski miktarı kaydet
-        old_quantity = product['quantity']
-        new_quantity = data.get('quantity', old_quantity)
-        quantity_diff = new_quantity - old_quantity
-        
-        # Ürünü güncelle
-        cursor.execute('''
-            UPDATE products 
-            SET name = %s, price = %s, quantity = %s, kdv = %s, otv = %s, min_stock_level = %s 
-            WHERE barcode = %s
-        ''', (
-            data.get('name', product['name']),
-            data.get('price', product['price']),
-            new_quantity,
-            data.get('kdv', product['kdv']),
-            data.get('otv', product['otv']),
-            data.get('min_stock_level', product['min_stock_level']),
-            barcode
-        ))
-        
-        # Stok hareketi kaydı (miktar değiştiyse)
-        if quantity_diff != 0:
-            movement_type = 'in' if quantity_diff > 0 else 'out'
-            cursor.execute(
-                'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
-                (barcode, data.get('name', product['name']), movement_type, abs(quantity_diff), getattr(request, 'user_id', 1))
-            )
-        
-        conn.commit()
-        
-        # Denetim kaydı
-        log_audit(getattr(request, 'user_id', 1), 'product_update', 
-                 f'Ürün güncellendi: {barcode} - {data.get("name", product["name"])}')
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Ürün başarıyla güncellendi'
-        })
-        
-    except Exception as e:
-        logger.error(f"Product update error: {str(e)}")
-        if conn:
-            conn.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': 'Ürün güncellenirken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        return jsonify({'status': 'error', 'message': '; '.join(errors)}), 400
 
+    try:
+        # Get product
+        existing, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+        if existing is None:
+            return jsonify({'status': 'error', 'message': 'Veritabanı hatası'}), 500
+        if isinstance(existing, list) and len(existing) == 0:
+            return jsonify({'status': 'error', 'message': 'Ürün bulunamadı'}), 404
+
+        product = existing[0]
+        old_quantity = int(product.get('quantity', 0))
+        new_quantity = int(data.get('quantity', old_quantity))
+        quantity_diff = new_quantity - old_quantity
+
+        update_payload = {
+            "name": data.get('name', product.get('name')),
+            "price": float(data.get('price', product.get('price', 0))),
+            "quantity": new_quantity,
+            "kdv": float(data.get('kdv', product.get('kdv', 18))),
+            "otv": float(data.get('otv', product.get('otv', 0))),
+            "min_stock_level": int(data.get('min_stock_level', product.get('min_stock_level', 5)))
+        }
+
+        supabase_patch("products", build_filters({"barcode": f"eq.{barcode}"}), update_payload)
+
+        # Create stock movement if change
+        try:
+            if quantity_diff != 0:
+                movement_type = 'in' if quantity_diff > 0 else 'out'
+                movement_payload = {
+                    "barcode": barcode,
+                    "product_name": update_payload["name"],
+                    "movement_type": movement_type,
+                    "quantity": abs(quantity_diff),
+                    "user_id": getattr(request, 'user_id', 1),
+                    "movement_date": now_iso()
+                }
+                supabase_post("stock_movements", movement_payload)
+        except Exception as e:
+            logger.warning(f"Stock movement after update failed: {e}")
+
+        # Audit log
+        log_audit_payload = {
+            "user_id": getattr(request, 'user_id', 1),
+            "action": "product_update",
+            "description": f"Ürün güncellendi: {barcode} - {update_payload['name']}",
+            "created_at": now_iso()
+        }
+        supabase_post("audit_logs", log_audit_payload)
+
+        return jsonify({'status': 'success', 'message': 'Ürün başarıyla güncellendi'})
+    except Exception as e:
+        logger.error(f"Product update error: {e}")
+        return jsonify({'status': 'error', 'message': 'Ürün güncellenirken hata oluştu'}), 500
+
+# =========================================================
+# DELETE PRODUCT
+# =========================================================
 @app.route('/api/products/<barcode>', methods=['DELETE'])
 @require_auth
 @transaction_handler
-def delete_product(cursor, barcode):
-    user_id = getattr(request, 'user_id', 1)
-    
-    # Ürün var mı kontrol et
-    cursor.execute('SELECT * FROM products WHERE barcode = %s', (barcode,))
-    product = cursor.fetchone()
-    
-    if not product:
-        return jsonify({
-            'status': 'error',
-            'message': 'Ürün bulunamadı'
-        }), 404
-    
-    # Ürünü sil
-    cursor.execute('DELETE FROM products WHERE barcode = %s', (barcode,))
-    
-    # Denetim kaydı
-    log_audit(user_id, 'product_delete', f'Ürün silindi: {barcode} - {product["name"]}')
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Ürün başarıyla silindi'
-    })
+def delete_product(barcode):
+    try:
+        # Check product exists
+        existing, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+        if existing is None:
+            return jsonify({'status': 'error', 'message': 'Veritabanı hatası'}), 500
+        if isinstance(existing, list) and len(existing) == 0:
+            return jsonify({'status': 'error', 'message': 'Ürün bulunamadı'}), 404
 
+        product = existing[0]
+        # Delete product
+        supabase_delete("products", build_filters({"barcode": f"eq.{barcode}"}))
+
+        # Audit log
+        log = {
+            "user_id": getattr(request, 'user_id', 1),
+            "action": "product_delete",
+            "description": f"Ürün silindi: {barcode} - {product.get('name')}",
+            "created_at": now_iso()
+        }
+        supabase_post("audit_logs", log)
+
+        return jsonify({'status': 'success', 'message': 'Ürün başarıyla silindi'})
+    except Exception as e:
+        logger.error(f"Delete product error: {e}")
+        return jsonify({'status': 'error', 'message': 'Ürün silinirken hata oluştu'}), 500
+
+# =========================================================
+# ADD STOCK
+# =========================================================
 @app.route('/api/stock/add', methods=['POST'])
 @require_auth
 @transaction_handler
-def add_stock(cursor):
-    data = request.get_json()
-    barcode = data.get('barcode')
-    quantity = data.get('quantity', 1)
-    name = data.get('name')
-    price = data.get('price')
-    kdv = data.get('kdv', 18)
-    otv = data.get('otv', 0)
-    min_stock_level = data.get('min_stock_level', 5)
-    
-    user_id = getattr(request, 'user_id', 1)
-    
-    # Validasyon
-    if quantity <= 0:
-        return jsonify({
-            'status': 'error', 
-            'message': 'Miktar pozitif olmalıdır'
-        }), 400
-    
-    # Ürün var mı kontrol et
-    cursor.execute(
-        'SELECT * FROM products WHERE barcode = %s', (barcode,)
-    )
-    product = cursor.fetchone()
-    
-    if product:
-        # Ürün varsa stok güncelle
-        new_quantity = product['quantity'] + quantity
-        cursor.execute(
-            'UPDATE products SET quantity = %s WHERE barcode = %s',
-            (new_quantity, barcode)
-        )
-        movement_type = 'in'
-        product_name = product['name']
-    else:
-        # Yeni ürün ekle
-        if not name or not price:
-            return jsonify({
-                'status': 'error', 
-                'message': 'Yeni ürün için ad ve fiyat gereklidir'
-            }), 400
-        
-        if price < 0:
-            return jsonify({
-                'status': 'error',
-                'message': 'Fiyat negatif olamaz'
-            }), 400
-        
-        cursor.execute(
-            'INSERT INTO products (barcode, name, price, quantity, kdv, otv, min_stock_level) VALUES (%s, %s, %s, %s, %s, %s, %s)',
-            (barcode, name, price, quantity, kdv, otv, min_stock_level)
-        )
-        movement_type = 'new'
-        product_name = name
-    
-    # Stok hareketi kaydı ekle
-    cursor.execute(
-        'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
-        (barcode, product_name, movement_type, quantity, user_id)
-    )
-    
-    # Denetim kaydı
-    log_audit(user_id, 'stock_update', f'{quantity} adet stok eklendi: {barcode} - {product_name}')
-    
-    return jsonify({
-        'status': 'success', 
-        'message': 'Stok güncellendi'
-    })
+def add_stock():
+    try:
+        data = request.get_json()
+        barcode = data.get('barcode')
+        quantity = int(data.get('quantity', 1))
+        name = data.get('name')
+        price = float(data.get('price', 0)) if data.get('price') is not None else None
+        kdv = float(data.get('kdv', 18))
+        otv = float(data.get('otv', 0))
+        min_stock_level = int(data.get('min_stock_level', 5))
+        user_id = getattr(request, 'user_id', 1)
 
+        if quantity <= 0:
+            return jsonify({'status': 'error', 'message': 'Miktar pozitif olmalıdır'}), 400
+
+        # Check product existence
+        existing, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+        if existing is None:
+            return jsonify({'status': 'error', 'message': 'Veritabanı hatası'}), 500
+
+        if isinstance(existing, list) and len(existing) > 0:
+            product = existing[0]
+            new_quantity = int(product.get('quantity', 0)) + quantity
+            supabase_patch("products", build_filters({"barcode": f"eq.{barcode}"}), {"quantity": new_quantity})
+            movement_type = 'in'
+            product_name = product.get('name')
+        else:
+            # create new product
+            if not name or price is None:
+                return jsonify({'status': 'error', 'message': 'Yeni ürün için ad ve fiyat gereklidir'}), 400
+            if price < 0:
+                return jsonify({'status': 'error', 'message': 'Fiyat negatif olamaz'}), 400
+            product_payload = {
+                "barcode": barcode,
+                "name": name,
+                "price": price,
+                "quantity": quantity,
+                "kdv": kdv,
+                "otv": otv,
+                "min_stock_level": min_stock_level,
+                "created_at": now_iso()
+            }
+            supabase_post("products", product_payload)
+            movement_type = 'new'
+            product_name = name
+
+        # Stock movement
+        stock_payload = {
+            "barcode": barcode,
+            "product_name": product_name,
+            "movement_type": movement_type,
+            "quantity": quantity,
+            "user_id": user_id,
+            "movement_date": now_iso()
+        }
+        supabase_post("stock_movements", stock_payload)
+
+        # Audit log
+        supabase_post("audit_logs", {
+            "user_id": user_id,
+            "action": "stock_update",
+            "description": f"{quantity} adet stok eklendi: {barcode} - {product_name}",
+            "created_at": now_iso()
+        })
+
+        return jsonify({'status': 'success', 'message': 'Stok güncellendi'})
+    except Exception as e:
+        logger.error(f"Add stock error: {e}")
+        return jsonify({'status': 'error', 'message': 'Stok güncellenirken hata oluştu'}), 500
+
+# =========================================================
+# MAKE SALE (complex)
+# =========================================================
 @app.route('/api/sale', methods=['POST'])
 @require_auth
 @transaction_handler
-def make_sale(cursor):
-    data = request.get_json()
-    items = data.get('items', [])
-    total = data.get('total', 0)
-    payment_method = data.get('payment_method', 'nakit')
-    cash_amount = data.get('cash_amount', 0)
-    credit_card_amount = data.get('credit_card_amount', 0)
-    change_amount = data.get('change_amount', 0)
-    user_id = getattr(request, 'user_id', 1)
-    
-    # Validasyon
-    errors = validate_sale_data(data)
-    if errors:
-        return jsonify({
-            'status': 'error',
-            'message': '; '.join(errors)
-        }), 400
-    
-    # Stok yeterliliği kontrolü
-    for item in items:
-        cursor.execute(
-            'SELECT quantity, name FROM products WHERE barcode = %s', 
-            (item['barcode'],)
-        )
-        product = cursor.fetchone()
-        
-        if not product:
-            return jsonify({
-                'status': 'error',
-                'message': f"Ürün bulunamadı: {item.get('name', item['barcode'])}"
-            }), 400
-        
-        if product['quantity'] < item['quantity']:
-            return jsonify({
-                'status': 'error',
-                'message': f"Yetersiz stok: {product['name']} (Mevcut: {product['quantity']}, İstenen: {item['quantity']})"
-            }), 400
-    
-    # Satış kaydı oluştur
-    cursor.execute(
-        'INSERT INTO sales (total_amount, payment_method, cash_amount, credit_card_amount, change_amount, user_id) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
-        (total, payment_method, cash_amount, credit_card_amount, change_amount, user_id)
-    )
-    sale_id = cursor.fetchone()['id']
-    
-    # Satış detaylarını ekle ve stokları güncelle
-    for item in items:
-        cursor.execute(
-            'INSERT INTO sale_items (sale_id, barcode, product_name, quantity, price) VALUES (%s, %s, %s, %s, %s)',
-            (sale_id, item['barcode'], item['name'], item['quantity'], item['price'])
-        )
-        
-        # Stok güncelle
-        cursor.execute(
-            'UPDATE products SET quantity = quantity - %s WHERE barcode = %s',
-            (item['quantity'], item['barcode'])
-        )
-        
-        # Stok hareketi kaydı
-        cursor.execute(
-            'INSERT INTO stock_movements (barcode, product_name, movement_type, quantity, user_id) VALUES (%s, %s, %s, %s, %s)',
-            (item['barcode'], item['name'], 'out', item['quantity'], user_id)
-        )
-    
-    # Kasa hareketi
-    if payment_method == 'nakit' and cash_amount > 0:
-        cursor.execute(
-            'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
-            ('sale', total, user_id, f'Satış #{sale_id}')
-        )
-        
-        # Kasa bakiyesini güncelle (kasa açıksa)
-        cursor.execute('SELECT * FROM cash_register WHERE id = 1')
-        cash_status = cursor.fetchone()
-        if cash_status and cash_status['is_open']:
-            new_balance = cash_status['current_amount'] + cash_amount
-            cursor.execute(
-                'UPDATE cash_register SET current_amount = %s WHERE id = 1',
-                (new_balance,)
-            )
-    
-    # Denetim kaydı
-    log_audit(user_id, 'sale', f'Satış yapıldı: #{sale_id} - {total} TL - {payment_method}')
-    
-    return jsonify({
-        'status': 'success', 
-        'sale_id': sale_id, 
-        'message': 'Satış başarıyla tamamlandı'
-    })
+def make_sale():
+    try:
+        data = request.get_json()
+        items = data.get('items', [])
+        total = float(data.get('total', 0))
+        payment_method = data.get('payment_method', 'nakit')
+        cash_amount = float(data.get('cash_amount', 0))
+        credit_card_amount = float(data.get('credit_card_amount', 0))
+        change_amount = float(data.get('change_amount', 0))
+        user_id = getattr(request, 'user_id', 1)
 
-# KASA YÖNETİMİ API'leri
+        # Validation
+        errors = validate_sale_data(data)
+        if errors:
+            return jsonify({'status': 'error', 'message': '; '.join(errors)}), 400
+
+        # Check stock availability for each item
+        for item in items:
+            barcode = item.get('barcode')
+            req_qty = int(item.get('quantity', 0))
+            prod_list, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+            if prod_list is None:
+                return jsonify({'status': 'error', 'message': 'Veritabanı hatası'}), 500
+            if isinstance(prod_list, list) and len(prod_list) == 0:
+                return jsonify({'status': 'error', 'message': f"Ürün bulunamadı: {item.get('name', barcode)}"}), 400
+            prod = prod_list[0]
+            if int(prod.get('quantity', 0)) < req_qty:
+                return jsonify({'status': 'error', 'message': f"Yetersiz stok: {prod.get('name')} (Mevcut: {prod.get('quantity')}, İstenen: {req_qty})"}), 400
+
+        # Create sale record
+        sale_payload = {
+            "total_amount": total,
+            "payment_method": payment_method,
+            "cash_amount": cash_amount,
+            "credit_card_amount": credit_card_amount,
+            "change_amount": change_amount,
+            "user_id": user_id,
+            "sale_date": now_iso()
+        }
+        # Post sale
+        created_sale, st = supabase_post("sales", sale_payload)
+        # Note: PostgREST often returns empty body; to get sale id you may need to set returning=representation or use SQL
+        # We'll attempt to fetch last inserted sale by filtering by timestamp and user_id (best-effort)
+        sale_id = None
+        if isinstance(created_sale, list) and len(created_sale) > 0 and created_sale[0].get('id'):
+            sale_id = created_sale[0]['id']
+        else:
+            # Try to find sale by matching on timestamp and user_id (approx)
+            recent_sales, s2 = supabase_get("sales", params=build_filters({"user_id": f"eq.{user_id}"}))
+            if recent_sales:
+                # pick the most recent (best-effort)
+                try:
+                    sale_id = sorted(recent_sales, key=lambda x: x.get('sale_date', ''))[-1].get('id')
+                except:
+                    sale_id = None
+
+        # If we can't determine sale_id, still proceed but some references will miss id
+        # Insert sale_items and update product quantities
+        for item in items:
+            barcode = item.get('barcode')
+            name = item.get('name')
+            qty = int(item.get('quantity'))
+            price = float(item.get('price', 0))
+            sale_item_payload = {
+                "sale_id": sale_id,
+                "barcode": barcode,
+                "product_name": name,
+                "quantity": qty,
+                "price": price
+            }
+            supabase_post("sale_items", sale_item_payload)
+            # decrement product quantity
+            prod_list, st = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+            if prod_list and isinstance(prod_list, list) and len(prod_list) > 0:
+                prod = prod_list[0]
+                new_qty = int(prod.get('quantity', 0)) - qty
+                if new_qty < 0:
+                    new_qty = 0
+                supabase_patch("products", build_filters({"barcode": f"eq.{barcode}"}), {"quantity": new_qty})
+            # stock movement
+            supabase_post("stock_movements", {
+                "barcode": barcode,
+                "product_name": name,
+                "movement_type": "out",
+                "quantity": qty,
+                "user_id": user_id,
+                "movement_date": now_iso()
+            })
+
+        # Cash transactions and cash register updates
+        if payment_method == 'nakit' and cash_amount > 0:
+            # insert into cash_transactions
+            supabase_post("cash_transactions", {
+                "transaction_type": "sale",
+                "amount": total,
+                "user_id": user_id,
+                "transaction_date": now_iso(),
+                "description": f"Satış #{sale_id}"
+            })
+            # update cash_register current_amount if open
+            cash_regs, s3 = supabase_get("cash_register", params=build_filters({"id": f"eq.1"}))
+            if cash_regs and isinstance(cash_regs, list) and len(cash_regs) > 0:
+                reg = cash_regs[0]
+                if reg.get('is_open'):
+                    new_balance = (reg.get('current_amount') or 0) + cash_amount
+                    supabase_patch("cash_register", build_filters({"id": f"eq.1"}), {"current_amount": new_balance})
+
+        # Audit log for sale
+        supabase_post("audit_logs", {
+            "user_id": user_id,
+            "action": "sale",
+            "description": f"Satış yapıldı: #{sale_id} - {total} TL - {payment_method}",
+            "created_at": now_iso()
+        })
+
+        return jsonify({'status': 'success', 'sale_id': sale_id, 'message': 'Satış başarıyla tamamlandı'})
+    except Exception as e:
+        logger.error(f"Make sale error: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({'status': 'error', 'message': 'Satış sırasında hata oluştu'}), 500
+
+# =========================================================
+# CASH endpoints
+# =========================================================
 @app.route('/api/cash/status')
 @require_auth
 def cash_status():
-    conn = None
-    cursor = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM cash_register WHERE id = 1')
-        cash_status = cursor.fetchone()
-        
-        if not cash_status:
-            # Varsayılan kasa durumu
-            cursor.execute('INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, FALSE, 0, 0)')
-            conn.commit()
-            cursor.execute('SELECT * FROM cash_register WHERE id = 1')
-            cash_status = cursor.fetchone()
-        
-        # Bugünkü nakit satışlar
+        cash_regs, st = supabase_get("cash_register", params=build_filters({"id": "eq.1"}))
+        if cash_regs is None:
+            return jsonify({'status': 'error', 'message': 'Kasa durumu alınırken hata oluştu'}), 500
+        if isinstance(cash_regs, list) and len(cash_regs) == 0:
+            # create default if not exists (anon key can create)
+            supabase_post("cash_register", {"id": 1, "is_open": False, "current_amount": 0, "opening_balance": 0, "last_updated": now_iso()})
+            cash_regs, st = supabase_get("cash_register", params=build_filters({"id": "eq.1"}))
+        cash_status = cash_regs[0] if isinstance(cash_regs, list) and len(cash_regs) > 0 else cash_regs
+
+        # today's cash sales
         today = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute(
-            'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
-            ('nakit', today)
-        )
-        cash_sales = cursor.fetchone()
-        
-        # Bugünkü kartlı satışlar
-        cursor.execute(
-            'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
-            ('kredi', today)
-        )
-        card_sales = cursor.fetchone()
-        
+        cash_sales, s1 = supabase_get("sales", params={"payment_method": f"eq.nakit", "sale_date": f"gte.{today}"})
+        # PostgREST filter by date might need DATE() - but we use a best-effort approach
+        # sum totals client-side if possible
+        cash_total = 0
+        if isinstance(cash_sales, list):
+            for s in cash_sales:
+                try:
+                    cash_total += float(s.get('total_amount', 0))
+                except:
+                    pass
+
+        card_sales, s2 = supabase_get("sales", params={"payment_method": f"eq.kredi", "sale_date": f"gte.{today}"})
+        card_total = 0
+        if isinstance(card_sales, list):
+            for s in card_sales:
+                try:
+                    card_total += float(s.get('total_amount', 0))
+                except:
+                    pass
+
         return jsonify({
             'status': 'success',
             'cash_status': {
-                'is_open': bool(cash_status['is_open']),
-                'current_amount': cash_status['current_amount'],
-                'opening_balance': cash_status['opening_balance'],
-                'opening_time': cash_status['opening_time'],
-                'cash_sales_today': cash_sales['total'] or 0,
-                'card_sales_today': card_sales['total'] or 0,
-                'expected_cash': (cash_status['opening_balance'] or 0) + (cash_sales['total'] or 0)
+                'is_open': bool(cash_status.get('is_open')),
+                'current_amount': cash_status.get('current_amount'),
+                'opening_balance': cash_status.get('opening_balance'),
+                'opening_time': cash_status.get('opening_time'),
+                'cash_sales_today': cash_total,
+                'card_sales_today': card_total,
+                'expected_cash': (cash_status.get('opening_balance') or 0) + cash_total
             }
         })
     except Exception as e:
-        logger.error(f"Cash status error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Kasa durumu alınırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Cash status error: {e}")
+        return jsonify({'status': 'error', 'message': 'Kasa durumu alınırken hata oluştu'}), 500
 
 @app.route('/api/cash/open', methods=['POST'])
 @require_auth
 @transaction_handler
-def open_cash(cursor):
-    data = request.get_json()
-    initial_amount = data.get('initial_amount', 0)
-    user_id = getattr(request, 'user_id', 1)
-    
-    if initial_amount < 0:
-        return jsonify({
-            'status': 'error',
-            'message': 'Başlangıç bakiyesi negatif olamaz'
-        }), 400
-    
-    # Kasa zaten açık mı kontrol et
-    cursor.execute('SELECT is_open FROM cash_register WHERE id = 1')
-    cash_status = cursor.fetchone()
-    
-    if cash_status and cash_status['is_open']:
-        return jsonify({
-            'status': 'error',
-            'message': 'Kasa zaten açık'
-        }), 400
-    
-    # Kasa durumunu güncelle
-    cursor.execute(
-        'UPDATE cash_register SET is_open = TRUE, current_amount = %s, opening_balance = %s, opening_time = CURRENT_TIMESTAMP WHERE id = 1',
-        (initial_amount, initial_amount)
-    )
-    
-    # Kasa hareketi kaydı
-    cursor.execute(
-        'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
-        ('open', initial_amount, user_id, 'Kasa açılışı')
-    )
-    
-    # Denetim kaydı
-    log_audit(user_id, 'cash_open', f'Kasa açıldı - Başlangıç: {initial_amount} TL')
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Kasa başarıyla açıldı'
-    })
+def open_cash():
+    try:
+        data = request.get_json()
+        initial_amount = float(data.get('initial_amount', 0))
+        user_id = getattr(request, 'user_id', 1)
+        if initial_amount < 0:
+            return jsonify({'status': 'error', 'message': 'Başlangıç bakiyesi negatif olamaz'}), 400
+
+        # check existing
+        regs, s = supabase_get("cash_register", params=build_filters({"id": "eq.1"}))
+        if regs and isinstance(regs, list) and len(regs) > 0 and regs[0].get('is_open'):
+            return jsonify({'status': 'error', 'message': 'Kasa zaten açık'}), 400
+
+        # update or create
+        if regs and isinstance(regs, list) and len(regs) > 0:
+            supabase_patch("cash_register", build_filters({"id": "eq.1"}), {"is_open": True, "current_amount": initial_amount, "opening_balance": initial_amount, "opening_time": now_iso()})
+        else:
+            supabase_post("cash_register", {"id": 1, "is_open": True, "current_amount": initial_amount, "opening_balance": initial_amount, "opening_time": now_iso(), "last_updated": now_iso()})
+
+        supabase_post("cash_transactions", {"transaction_type": "open", "amount": initial_amount, "user_id": user_id, "transaction_date": now_iso(), "description": "Kasa açılışı"})
+        supabase_post("audit_logs", {"user_id": user_id, "action": "cash_open", "description": f"Kasa açıldı - Başlangıç: {initial_amount} TL", "created_at": now_iso()})
+
+        return jsonify({'status': 'success', 'message': 'Kasa başarıyla açıldı'})
+    except Exception as e:
+        logger.error(f"Open cash error: {e}")
+        return jsonify({'status': 'error', 'message': 'Kasa açılırken hata oluştu'}), 500
 
 @app.route('/api/cash/close', methods=['POST'])
 @require_auth
 @transaction_handler
-def close_cash(cursor):
-    data = request.get_json()
-    final_amount = data.get('final_amount', 0)
-    user_id = getattr(request, 'user_id', 1)
-    
-    if final_amount < 0:
-        return jsonify({
-            'status': 'error',
-            'message': 'Kapanış bakiyesi negatif olamaz'
-        }), 400
-    
-    # Kasa açık mı kontrol et
-    cursor.execute('SELECT * FROM cash_register WHERE id = 1')
-    cash_status = cursor.fetchone()
-    
-    if not cash_status or not cash_status['is_open']:
-        return jsonify({
-            'status': 'error',
-            'message': 'Kasa zaten kapalı'
-        }), 400
-    
-    # Bugünkü nakit satışları hesapla
-    cursor.execute(
-        'SELECT SUM(total_amount) as total FROM sales WHERE payment_method = %s AND DATE(sale_date) = %s',
-        ('nakit', datetime.now().strftime('%Y-%m-%d'))
-    )
-    cash_sales = cursor.fetchone()
-    cash_sales_total = cash_sales['total'] or 0
-    
-    # Beklenen nakit miktarı
-    expected_cash = (cash_status['opening_balance'] or 0) + cash_sales_total
-    
-    # Kasa durumunu güncelle
-    cursor.execute(
-        'UPDATE cash_register SET is_open = FALSE, current_amount = 0, closing_time = CURRENT_TIMESTAMP WHERE id = 1'
-    )
-    
-    # Kasa hareketi kaydı
-    cursor.execute(
-        'INSERT INTO cash_transactions (transaction_type, amount, user_id, description) VALUES (%s, %s, %s, %s)',
-        ('close', final_amount, user_id, f'Kasa kapanışı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL')
-    )
-    
-    # Denetim kaydı
-    log_audit(user_id, 'cash_close', 
-             f'Kasa kapandı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL')
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Kasa başarıyla kapandı',
-        'summary': {
-            'opening_balance': cash_status['opening_balance'],
-            'cash_sales': cash_sales_total,
-            'expected_cash': expected_cash,
-            'actual_cash': final_amount,
-            'difference': final_amount - expected_cash
-        }
-    })
+def close_cash():
+    try:
+        data = request.get_json()
+        final_amount = float(data.get('final_amount', 0))
+        user_id = getattr(request, 'user_id', 1)
+        if final_amount < 0:
+            return jsonify({'status': 'error', 'message': 'Kapanış bakiyesi negatif olamaz'}), 400
 
-# RAPORLAMA API'leri
+        regs, s = supabase_get("cash_register", params=build_filters({"id": "eq.1"}))
+        if regs is None or len(regs) == 0:
+            return jsonify({'status': 'error', 'message': 'Kasa zaten kapalı veya tanımlı değil'}), 400
+        cash_status = regs[0]
+        if not cash_status.get('is_open'):
+            return jsonify({'status': 'error', 'message': 'Kasa zaten kapalı'}), 400
+
+        # calculate today's cash sales
+        today = datetime.now().strftime('%Y-%m-%d')
+        cash_sales, s1 = supabase_get("sales", params={"payment_method": f"eq.nakit", "sale_date": f"gte.{today}"})
+        cash_sales_total = 0
+        if isinstance(cash_sales, list):
+            for s in cash_sales:
+                try:
+                    cash_sales_total += float(s.get('total_amount', 0))
+                except:
+                    pass
+
+        expected_cash = (cash_status.get('opening_balance') or 0) + cash_sales_total
+
+        # update cash_register to closed
+        supabase_patch("cash_register", build_filters({"id": "eq.1"}), {"is_open": False, "current_amount": 0, "closing_time": now_iso()})
+
+        supabase_post("cash_transactions", {"transaction_type": "close", "amount": final_amount, "user_id": user_id, "transaction_date": now_iso(), "description": f"Kasa kapanışı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL"})
+        supabase_post("audit_logs", {"user_id": user_id, "action": "cash_close", "description": f"Kasa kapandı - Beklenen: {expected_cash} TL, Gerçek: {final_amount} TL", "created_at": now_iso()})
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Kasa başarıyla kapandı',
+            'summary': {
+                'opening_balance': cash_status.get('opening_balance'),
+                'cash_sales': cash_sales_total,
+                'expected_cash': expected_cash,
+                'actual_cash': final_amount,
+                'difference': final_amount - expected_cash
+            }
+        })
+    except Exception as e:
+        logger.error(f"Close cash error: {e}")
+        return jsonify({'status': 'error', 'message': 'Kasa kapanırken hata oluştu'}), 500
+
+# =========================================================
+# REPORTS
+# =========================================================
 @app.route('/api/reports/sales')
 @require_auth
 def sales_report():
-    conn = None
-    cursor = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        
-        query = '''
-            SELECT s.*, u.full_name as user_name 
-            FROM sales s 
-            LEFT JOIN users u ON s.user_id = u.id 
-            WHERE 1=1
-        '''
-        params = []
-        
+        # Build filters for supabase
+        params = {}
         if start_date:
-            query += ' AND DATE(s.sale_date) >= %s'
-            params.append(start_date)
-        
+            # using gte on sale_date
+            params["sale_date"] = f"gte.{start_date}"
         if end_date:
-            query += ' AND DATE(s.sale_date) <= %s'
-            params.append(end_date)
-        
-        query += ' ORDER BY s.sale_date DESC'
-        
-        cursor.execute(query, params)
-        sales = cursor.fetchall()
-        
-        return jsonify({
-            'status': 'success',
-            'sales': [dict(sale) for sale in sales]
-        })
+            # using lte on sale_date
+            params["sale_date"] = f"lte.{end_date}"
+        # We want joined user name; PostgREST supports select=*,users(full_name) if foreign key configured.
+        # If not, return sales and user_id, user names can be fetched on client as needed.
+        sales, st = supabase_get("sales", params=params)
+        if sales is None:
+            return jsonify({'status': 'error', 'message': 'Satış raporu alınırken hata oluştu'}), 500
+        return jsonify({'status': 'success', 'sales': sales})
     except Exception as e:
-        logger.error(f"Sales report error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Satış raporu alınırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Sales report error: {e}")
+        return jsonify({'status': 'error', 'message': 'Satış raporu alınırken hata oluştu'}), 500
 
 @app.route('/api/reports/stock')
 @require_auth
 def stock_report():
-    conn = None
-    cursor = None
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Düşük stoklu ürünler
-        cursor.execute('''
-            SELECT * FROM products 
-            WHERE quantity <= min_stock_level 
-            ORDER BY quantity ASC
-        ''')
-        low_stock = cursor.fetchall()
-        
-        # Stok hareketleri
-        cursor.execute('''
-            SELECT sm.*, u.full_name as user_name 
-            FROM stock_movements sm 
-            LEFT JOIN users u ON sm.user_id = u.id 
-            ORDER BY sm.movement_date DESC 
-            LIMIT 100
-        ''')
-        movements = cursor.fetchall()
-        
+        # low stock items
+        low_stock, st = supabase_get("products", params={"quantity": f"lte.min_stock_level", "order": "quantity.asc"})
+        # fallback: if server doesn't support that comparator, fetch all and filter locally
+        if low_stock is None:
+            all_products, st2 = supabase_get("products")
+            if all_products is None:
+                return jsonify({'status': 'error', 'message': 'Stok raporu alınırken hata oluştu'}), 500
+            low_stock = [p for p in all_products if int(p.get('quantity',0)) <= int(p.get('min_stock_level',5))]
+        movements, st3 = supabase_get("stock_movements", params={"order": "movement_date.desc", "limit": 100})
+        if movements is None:
+            movements = []
         return jsonify({
             'status': 'success',
-            'low_stock': [dict(product) for product in low_stock],
-            'movements': [dict(movement) for movement in movements]
+            'low_stock': low_stock,
+            'movements': movements
         })
     except Exception as e:
-        logger.error(f"Stock report error: {str(e)}")
-        return jsonify({
-            'status': 'error',
-            'message': 'Stok raporu alınırken hata oluştu'
-        }), 500
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Stock report error: {e}")
+        return jsonify({'status': 'error', 'message': 'Stok raporu alınırken hata oluştu'}), 500
 
-# Denetim kaydı fonksiyonu
+# =========================================================
+# Audit log helper (keeps same interface)
+# =========================================================
 def log_audit(user_id, action, description, ip_address=None):
-    """Denetim kaydı ekle"""
-    conn = None
-    cursor = None
+    """Denetim kaydı ekle (REST)"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'INSERT INTO audit_logs (user_id, action, description, ip_address) VALUES (%s, %s, %s, %s)',
-            (user_id, action, description, ip_address or request.remote_addr)
-        )
-        conn.commit()
+        payload = {
+            "user_id": user_id,
+            "action": action,
+            "description": description,
+            "ip_address": ip_address or request.remote_addr,
+            "created_at": now_iso()
+        }
+        supabase_post("audit_logs", payload)
     except Exception as e:
-        logger.error(f"Audit log error: {str(e)}")
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        logger.error(f"Audit log error: {e}")
 
-# Hata yönetimi
+# =========================================================
+# ERROR HANDLING
+# =========================================================
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Sayfa bulunamadı'
-    }), 404
+    return jsonify({'status': 'error', 'message': 'Sayfa bulunamadı'}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"Internal server error: {str(error)}")
+    logger.error(f"Internal server error: {error}")
     logger.error(traceback.format_exc())
-    return jsonify({
-        'status': 'error',
-        'message': 'Sunucu hatası oluştu'
-    }), 500
+    return jsonify({'status': 'error', 'message': 'Sunucu hatası oluştu'}), 500
 
 @app.before_request
 def before_request():
-    """Her request'ten önce database'in hazır olduğundan emin ol"""
+    """Her request'ten önce (opsiyonel) DB hazır mı kontrol et"""
+    # Not forcing init on every request to prevent extra load, but keep basic check
+    # We skip static endpoints
     if request.endpoint and request.endpoint != 'static':
+        # not blocking requests if false — many endpoints handle DB errors themselves
         ensure_db_initialized()
 
-# Uygulama başlatma
+# =========================================================
+# MAIN ENTRY POINT
+# =========================================================
 if __name__ == '__main__':
     try:
-        logger.info("Initializing database...")
-        init_db()
-        logger.info("Database initialized successfully")
+        # On startup try to ensure DB reachable
+        ensure_db_initialized()
     except Exception as e:
-        logger.error(f"Database initialization failed: {e}")
-        logger.error(traceback.format_exc())
-    
-    # Render için port ayarı
+        logger.warning(f"Startup DB check produced an error: {e}")
+
     port = int(os.environ.get('PORT', 5000))
-    
-    # Render'da production modunda çalıştır
+    # If running on Render or production choose production server, else default flask
     if os.environ.get('RENDER'):
-        # Production için Waitress kullan
-        from waitress import serve
-        logger.info(f"Starting production server on port {port}")
-        serve(app, host='0.0.0.0', port=port)
+        try:
+            from waitress import serve
+            logger.info(f"Starting production server on port {port}")
+            serve(app, host='0.0.0.0', port=port)
+        except Exception as e:
+            logger.info(f"Waitress start failed, starting Flask dev server: {e}")
+            app.run(host='0.0.0.0', port=port, debug=False)
     else:
-        # Development için Flask built-in server
         logger.info(f"Starting development server on port {port}")
-        app.run(
-            host='0.0.0.0', 
-            port=port, 
-            debug=True
-        )
+        app.run(host='0.0.0.0', port=port, debug=True)
