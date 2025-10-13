@@ -1,0 +1,17 @@
+{
+  "name": "your-app-name",
+  "version": "1.0.0",
+  "description": "Your Flask application",
+  "main": "app.py",
+  "scripts": {
+    "dev": "python app.py",
+    "start": "gunicorn app:app"
+  },
+  "dependencies": {
+    "flask": "^2.3.3",
+    "gunicorn": "^21.2.0"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
