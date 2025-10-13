@@ -1,7 +1,7 @@
 #!/bin/bash
 echo "Build başlıyor..."
 
-# Gereksiz bağımlılıkları kaldır, sadece gerekli olanları yükle
+# Python paketlerini yükle
 pip install -r requirements.txt
 
 echo "Build tamamlandı!"

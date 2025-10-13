@@ -4,4 +4,4 @@ psycopg2-binary==2.9.9
 Werkzeug==2.3.0
 python-dotenv==0.19.0
 qrcode==7.4.2
-Pillow==10.0.1
+Pillow==10.3.0
