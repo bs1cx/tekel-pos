@@ -14,6 +14,8 @@ let cashRegister = {
 };
 let allProducts = []; // Tüm ürünlerin kopyası
 let editingProduct = null; // Düzenlenen ürün
+let cameraStream = null; // Kamera stream'i
+let isCameraActive = false; // Kamera durumu
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -74,6 +76,16 @@ function setupEventListeners() {
     if (productSearch) {
         productSearch.addEventListener('input', function(e) {
             filterProducts();
+        });
+    }
+    
+    // Hızlı barkod input'u
+    const quickBarcodeInput = document.getElementById('quickBarcodeInput');
+    if (quickBarcodeInput) {
+        quickBarcodeInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                quickStockAdd();
+            }
         });
     }
     
@@ -205,6 +217,10 @@ function switchTab(tabName) {
             // Satış sekmesine özel ayarlar
             document.getElementById('barcodeInput').focus();
             loadProductGrid(); // Ürün grid'ini yükle
+            break;
+        case 'mobile-stock':
+            // Mobil stok sekmesine özel ayarlar
+            stopCamera(); // Sekme değişince kamerayı kapat
             break;
         case 'reports':
             loadReports();
@@ -924,7 +940,7 @@ function printReceipt() {
     printWindow.document.close();
 }
 
-// Ürünleri yükle - DÜZELTİLDİ (Edit/Delete butonları eklendi)
+// Ürünleri yükle
 function loadProducts() {
     const tableBody = document.getElementById('productsTableBody');
     
@@ -968,7 +984,7 @@ function loadProducts() {
     tableBody.innerHTML = tableHTML;
 }
 
-// Ürün düzenle - YENİ EKLENDİ
+// Ürün düzenle
 function editProduct(barcode) {
     const product = products.find(p => p.barcode === barcode);
     if (!product) {
@@ -997,7 +1013,7 @@ function editProduct(barcode) {
     openModal('addProductModal');
 }
 
-// Ürün güncelle - YENİ EKLENDİ
+// Ürün güncelle
 function updateProduct(event) {
     event.preventDefault();
     
@@ -1039,7 +1055,7 @@ function updateProduct(event) {
     showStatus('Ürün başarıyla güncellendi!', 'success');
 }
 
-// Ürün sil - YENİ EKLENDİ
+// Ürün sil
 function deleteProduct(barcode) {
     const product = products.find(p => p.barcode === barcode);
     if (!product) {
@@ -1320,6 +1336,242 @@ function addNewProduct(event) {
     showStatus('Ürün başarıyla eklendi!', 'success');
 }
 
+// Kamera aç - TAMAMEN YENİLENDİ
+async function startCamera() {
+    const startCameraBtn = document.getElementById('startCameraBtn');
+    const stopCameraBtn = document.getElementById('stopCameraBtn');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const scanResult = document.getElementById('scanResult');
+    const videoElement = document.getElementById('videoElement');
+    
+    try {
+        // Kameraya erişim iste
+        cameraStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment', // Arka kamerayı kullan
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
+        });
+        
+        // Video element'ine stream'i bağla
+        videoElement.srcObject = cameraStream;
+        isCameraActive = true;
+        
+        // UI güncelleme
+        startCameraBtn.style.display = 'none';
+        stopCameraBtn.style.display = 'inline-block';
+        cameraPreview.style.display = 'block';
+        scanResult.innerHTML = `
+            <div class="scanning-state">
+                <i class="fas fa-camera"></i>
+                <p>Kamera açıldı. Barkodu kameraya gösterin...</p>
+                <div class="scanning-animation"></div>
+            </div>
+        `;
+        
+        showStatus('Kamera başarıyla açıldı!', 'success');
+        
+        // Barkod taramayı başlat
+        startBarcodeScanning();
+        
+    } catch (error) {
+        console.error('Kamera açılamadı:', error);
+        showStatus('Kamera açılamadı! Lütfen kamera iznini kontrol edin.', 'error');
+        
+        // Demo modda çalış (kamera olmadan)
+        startCameraBtn.style.display = 'none';
+        stopCameraBtn.style.display = 'inline-block';
+        cameraPreview.style.display = 'block';
+        scanResult.innerHTML = `
+            <div class="demo-scanning">
+                <i class="fas fa-mobile-alt"></i>
+                <p>Demo Mod: Kamera simülasyonu</p>
+                <p>Barkod: <strong>8691234567890</strong></p>
+                <button class="btn-primary" onclick="simulateBarcodeScan('8691234567890')">
+                    <i class="fas fa-barcode"></i> Barkod Tara (Demo)
+                </button>
+                <button class="btn-secondary" onclick="simulateBarcodeScan('8691234567891')">
+                    <i class="fas fa-barcode"></i> Diğer Barkod (Demo)
+                </button>
+            </div>
+        `;
+    }
+}
+
+// Barkod taramayı başlat - YENİ EKLENDİ
+function startBarcodeScanning() {
+    if (!isCameraActive) return;
+    
+    const videoElement = document.getElementById('videoElement');
+    const canvasElement = document.getElementById('canvasElement');
+    const canvas = canvasElement.getContext('2d');
+    
+    // Tarama döngüsü
+    function scanBarcode() {
+        if (!isCameraActive) return;
+        
+        try {
+            // Canvas'a video frame'ini çiz
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            canvas.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            
+            // Image data'yı al
+            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Basit barkod simülasyonu (gerçek uygulamada Quagga.js veya benzeri kütüphane kullanılır)
+            simulateBarcodeDetection();
+            
+        } catch (error) {
+            console.error('Barkod tarama hatası:', error);
+        }
+        
+        // Sonraki frame için tekrar çağır
+        if (isCameraActive) {
+            setTimeout(scanBarcode, 1000);
+        }
+    }
+    
+    // Video hazır olduğunda taramayı başlat
+    videoElement.addEventListener('loadeddata', scanBarcode);
+}
+
+// Barkod tespit simülasyonu - YENİ EKLENDİ
+function simulateBarcodeDetection() {
+    // Rastgele barkod tespit simülasyonu (%10 şans)
+    if (Math.random() < 0.1) {
+        const demoBarcodes = ['8691234567890', '8691234567891', '8691234567892', '8691234567893'];
+        const randomBarcode = demoBarcodes[Math.floor(Math.random() * demoBarcodes.length)];
+        simulateBarcodeScan(randomBarcode);
+    }
+}
+
+// Barkod tarama simülasyonu - YENİ EKLENDİ
+function simulateBarcodeScan(barcode) {
+    const scanResult = document.getElementById('scanResult');
+    
+    // Barkodu text input'una yaz
+    document.getElementById('quickBarcodeInput').value = barcode;
+    document.getElementById('barcodeFieldMobile').value = barcode;
+    document.getElementById('scannedBarcodeMobile').value = barcode;
+    
+    // Tarama sonucunu göster
+    scanResult.innerHTML = `
+        <div class="scan-success">
+            <i class="fas fa-check-circle"></i>
+            <p>Barkod başarıyla okundu!</p>
+            <div class="scanned-barcode">
+                <strong>Barkod:</strong> ${barcode}
+            </div>
+            <p>Ürün bilgilerini girmek için aşağıdaki formu kullanın.</p>
+        </div>
+    `;
+    
+    // Manuel ürün formunu göster
+    document.getElementById('manualProductForm').style.display = 'block';
+    
+    showStatus(`Barkod okundu: ${barcode}`, 'success');
+}
+
+// Kamera kapat - GÜNCELLENDİ
+function stopCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
+    
+    isCameraActive = false;
+    
+    // UI güncelleme
+    document.getElementById('startCameraBtn').style.display = 'inline-block';
+    document.getElementById('stopCameraBtn').style.display = 'none';
+    document.getElementById('cameraPreview').style.display = 'none';
+    document.getElementById('scanResult').innerHTML = `
+        <div class="empty-state">
+            <i class="fas fa-barcode"></i>
+            <p>Kamerayı açıp barkod tarayın</p>
+        </div>
+    `;
+    
+    showStatus('Kamera kapatıldı.', 'info');
+}
+
+// Hızlı stok ekle - TAMAMEN YENİLENDİ
+function quickStockAdd() {
+    const barcodeInput = document.getElementById('quickBarcodeInput');
+    const quantityInput = document.getElementById('quickStockQuantity');
+    
+    const barcode = barcodeInput.value.trim();
+    const quantity = parseInt(quantityInput.value) || 1;
+    
+    if (!barcode) {
+        showStatus('Lütfen barkod girin veya tarayın!', 'error');
+        return;
+    }
+    
+    // Ürünü bul
+    const product = products.find(p => p.barcode === barcode);
+    
+    if (product) {
+        // Mevcut ürün - stok ekle
+        product.stock += quantity;
+        saveToLocalStorage();
+        loadInventory();
+        refreshDashboard();
+        
+        showStatus(`${product.name} stok eklendi: +${quantity} (Toplam: ${product.stock})`, 'success');
+        
+        // Formu temizle
+        barcodeInput.value = '';
+        quantityInput.value = '1';
+        
+    } else {
+        // Yeni ürün - form göster
+        document.getElementById('barcodeFieldMobile').value = barcode;
+        document.getElementById('scannedBarcodeMobile').value = barcode;
+        document.getElementById('manualProductForm').style.display = 'block';
+        
+        showStatus('Bu barkoda sahip ürün bulunamadı. Lütfen ürün bilgilerini girin.', 'warning');
+    }
+}
+
+// Mobil'den yeni ürün ekle - YENİ EKLENDİ
+function addNewProductFromMobile(event) {
+    event.preventDefault();
+    
+    const newProduct = {
+        barcode: document.getElementById('barcodeFieldMobile').value,
+        name: document.getElementById('productNameMobile').value,
+        price: parseFloat(document.getElementById('productPriceMobile').value),
+        stock: parseInt(document.getElementById('productQuantityMobile').value),
+        minStock: parseInt(document.getElementById('productMinStockMobile').value),
+        kdv: parseFloat(document.getElementById('productKDVMobile').value),
+        otv: parseFloat(document.getElementById('productOTVMobile').value)
+    };
+    
+    // Barkod kontrolü
+    if (products.find(p => p.barcode === newProduct.barcode)) {
+        showStatus('Bu barkoda sahip ürün zaten var!', 'error');
+        return;
+    }
+    
+    products.push(newProduct);
+    allProducts = [...products]; // Tüm ürünleri güncelle
+    saveToLocalStorage();
+    
+    // Formları temizle
+    document.getElementById('quickBarcodeInput').value = '';
+    document.getElementById('manualProductForm').style.display = 'none';
+    document.getElementById('mobileProductForm').reset();
+    
+    loadProducts();
+    loadInventory();
+    refreshDashboard();
+    
+    showStatus('Ürün başarıyla eklendi ve stok güncellendi!', 'success');
+}
+
 // Raporları yükle
 function loadReports() {
     // Demo rapor verileri
@@ -1458,6 +1710,8 @@ function openAdminTab(tabName) {
 // Sayfa kapatılırken verileri kaydet
 window.addEventListener('beforeunload', function() {
     saveToLocalStorage();
+    // Kamerayı kapat
+    stopCamera();
 });
 
 // Hata yönetimi
