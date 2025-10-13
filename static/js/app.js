@@ -17,6 +17,8 @@ let editingProduct = null; // Düzenlenen ürün
 let cameraStream = null; // Kamera stream'i
 let isCameraActive = false; // Kamera durumu
 let quaggaInitialized = false; // Quagga başlatma durumu
+let lastDetectedBarcode = null; // Son tespit edilen barkod
+let barcodeDetectionTimeout = null; // Barkod tespit timeout'u
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -1337,7 +1339,7 @@ function addNewProduct(event) {
     showStatus('Ürün başarıyla eklendi!', 'success');
 }
 
-// Kamera aç - QUAGGA.JS ENTEGRE EDİLDİ
+// Kamera aç - TAMAMEN YENİLENDİ
 async function startCamera() {
     const startCameraBtn = document.getElementById('startCameraBtn');
     const stopCameraBtn = document.getElementById('stopCameraBtn');
@@ -1346,10 +1348,14 @@ async function startCamera() {
     const videoElement = document.getElementById('videoElement');
     
     try {
+        // Önce kamerayı temizle
+        stopCamera();
+        
         // Quagga.js ile barkod taramayı başlat
         await initializeQuagga();
         
         isCameraActive = true;
+        lastDetectedBarcode = null; // Reset barcode detection
         
         // UI güncelleme
         startCameraBtn.style.display = 'none';
@@ -1360,6 +1366,7 @@ async function startCamera() {
                 <i class="fas fa-camera"></i>
                 <p>Kamera açıldı. Barkodu kameraya gösterin...</p>
                 <div class="scanning-animation"></div>
+                <p class="scanning-hint">Barkod okunduktan sonra otomatik olarak form doldurulacak</p>
             </div>
         `;
         
@@ -1380,13 +1387,19 @@ async function startCamera() {
                 <div class="demo-barcodes">
                     <p>Örnek barkodlar:</p>
                     <div class="barcode-list">
-                        <span onclick="setBarcodeInput('8691234567890')">8691234567890 - Marlboro Red</span>
-                        <span onclick="setBarcodeInput('8691234567891')">8691234567891 - Marlboro Gold</span>
-                        <span onclick="setBarcodeInput('8691234567892')">8691234567892 - Camel Yellow</span>
+                        <span class="barcode-option" onclick="setBarcodeInput('8691234567890')">
+                            <i class="fas fa-barcode"></i> 8691234567890 - Marlboro Red
+                        </span>
+                        <span class="barcode-option" onclick="setBarcodeInput('8691234567891')">
+                            <i class="fas fa-barcode"></i> 8691234567891 - Marlboro Gold
+                        </span>
+                        <span class="barcode-option" onclick="setBarcodeInput('8691234567892')">
+                            <i class="fas fa-barcode"></i> 8691234567892 - Camel Yellow
+                        </span>
                     </div>
                 </div>
                 <div class="manual-input">
-                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin">
+                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin" class="form-input">
                     <button class="btn-primary" onclick="useManualBarcode()">
                         <i class="fas fa-check"></i> Kullan
                     </button>
@@ -1396,10 +1409,11 @@ async function startCamera() {
     }
 }
 
-// Quagga.js başlat - YENİ EKLENDİ
+// Quagga.js başlat - GÜNCELLENDİ
 function initializeQuagga() {
     return new Promise((resolve, reject) => {
         if (quaggaInitialized) {
+            Quagga.start();
             resolve();
             return;
         }
@@ -1425,7 +1439,12 @@ function initializeQuagga() {
                     "upc_e_reader"
                 ]
             },
-            locate: true
+            locator: {
+                patchSize: "medium",
+                halfSample: true
+            },
+            locate: true,
+            numOfWorkers: 2
         }, function(err) {
             if (err) {
                 console.error("Quagga başlatılamadı:", err);
@@ -1451,18 +1470,23 @@ function initializeQuagga() {
     });
 }
 
-// Barkod tespit edildiğinde - YENİ EKLENDİ
+// Barkod tespit edildiğinde - GÜNCELLENDİ
 function handleBarcodeDetection(barcode) {
     if (!isCameraActive) return;
     
-    // Aynı barkodun tekrar tekrar işlenmesini önle
-    if (this.lastDetectedBarcode === barcode) return;
-    this.lastDetectedBarcode = barcode;
+    // Aynı barkodun tekrar tekrar işlenmesini önle (3 saniye timeout)
+    if (lastDetectedBarcode === barcode) return;
     
-    // 2 saniye sonra resetle
-    setTimeout(() => {
-        this.lastDetectedBarcode = null;
-    }, 2000);
+    lastDetectedBarcode = barcode;
+    
+    // Timeout'u temizle ve yeniden başlat
+    if (barcodeDetectionTimeout) {
+        clearTimeout(barcodeDetectionTimeout);
+    }
+    
+    barcodeDetectionTimeout = setTimeout(() => {
+        lastDetectedBarcode = null;
+    }, 3000);
     
     const scanResult = document.getElementById('scanResult');
     
@@ -1479,7 +1503,15 @@ function handleBarcodeDetection(barcode) {
             <div class="scanned-barcode">
                 <strong>Barkod:</strong> ${barcode}
             </div>
-            <p>Ürün bilgilerini girmek için aşağıdaki formu kullanın.</p>
+            <div class="scan-actions">
+                <button class="btn-success" onclick="quickStockAdd()">
+                    <i class="fas fa-plus"></i> Hızlı Stok Ekle
+                </button>
+                <button class="btn-primary" onclick="resetScanner()">
+                    <i class="fas fa-redo"></i> Yeni Barkod Tara
+                </button>
+            </div>
+            <p class="scan-hint">Yeni barkod taramak için "Yeni Barkod Tara" butonuna tıklayın</p>
         </div>
     `;
     
@@ -1487,17 +1519,38 @@ function handleBarcodeDetection(barcode) {
     document.getElementById('manualProductForm').style.display = 'block';
     
     showStatus(`Barkod okundu: ${barcode}`, 'success');
-    
-    // Kamerayı otomatik kapat (isteğe bağlı)
-    // setTimeout(stopCamera, 3000);
 }
 
-// Manuel barkod input'u için - YENİ EKLENDİ
+// Tarayıcıyı sıfırla - YENİ EKLENDİ
+function resetScanner() {
+    lastDetectedBarcode = null;
+    
+    const scanResult = document.getElementById('scanResult');
+    scanResult.innerHTML = `
+        <div class="scanning-state">
+            <i class="fas fa-camera"></i>
+            <p>Kamera hazır. Yeni barkodu tarayın...</p>
+            <div class="scanning-animation"></div>
+        </div>
+    `;
+    
+    // Input'ları temizle
+    document.getElementById('quickBarcodeInput').value = '';
+    document.getElementById('barcodeFieldMobile').value = '';
+    document.getElementById('scannedBarcodeMobile').value = '';
+    
+    // Formu gizle
+    document.getElementById('manualProductForm').style.display = 'none';
+    
+    showStatus('Tarayıcı sıfırlandı. Yeni barkod tarayabilirsiniz.', 'info');
+}
+
+// Manuel barkod input'u için
 function setBarcodeInput(barcode) {
     document.getElementById('manualBarcodeInput').value = barcode;
 }
 
-// Manuel barkod kullan - YENİ EKLENDİ
+// Manuel barkod kullan
 function useManualBarcode() {
     const barcode = document.getElementById('manualBarcodeInput').value.trim();
     if (barcode) {
@@ -1520,6 +1573,12 @@ function stopCamera() {
     }
     
     isCameraActive = false;
+    lastDetectedBarcode = null;
+    
+    if (barcodeDetectionTimeout) {
+        clearTimeout(barcodeDetectionTimeout);
+        barcodeDetectionTimeout = null;
+    }
     
     // UI güncelleme
     document.getElementById('startCameraBtn').style.display = 'inline-block';
@@ -1531,6 +1590,10 @@ function stopCamera() {
             <p>Kamerayı açıp barkod tarayın</p>
         </div>
     `;
+    
+    // Formları temizle
+    document.getElementById('quickBarcodeInput').value = '';
+    document.getElementById('manualProductForm').style.display = 'none';
     
     showStatus('Kamera kapatıldı.', 'info');
 }
@@ -1560,8 +1623,8 @@ function quickStockAdd() {
         
         showStatus(`${product.name} stok eklendi: +${quantity} (Toplam: ${product.stock})`, 'success');
         
-        // Formu temizle
-        barcodeInput.value = '';
+        // Formu temizle ve tarayıcıyı sıfırla
+        resetScanner();
         quantityInput.value = '1';
         
     } else {
@@ -1574,7 +1637,7 @@ function quickStockAdd() {
     }
 }
 
-// Mobil'den yeni ürün ekle
+// Mobil'den yeni ürün ekle - GÜNCELLENDİ
 function addNewProductFromMobile(event) {
     event.preventDefault();
     
@@ -1598,10 +1661,10 @@ function addNewProductFromMobile(event) {
     allProducts = [...products]; // Tüm ürünleri güncelle
     saveToLocalStorage();
     
-    // Formları temizle
-    document.getElementById('quickBarcodeInput').value = '';
-    document.getElementById('manualProductForm').style.display = 'none';
+    // Formları temizle ve tarayıcıyı sıfırla
+    resetScanner();
     document.getElementById('mobileProductForm').reset();
+    document.getElementById('quickStockQuantity').value = '1';
     
     loadProducts();
     loadInventory();
