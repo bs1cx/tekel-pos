@@ -1,1681 +1,1162 @@
-class TekelPOS {
-    constructor() {
-        if (window.posInstance) {
-            return window.posInstance;
-        }
-        window.posInstance = this;
-        
-        this.products = [];
-        this.cart = [];
-        this.currentUser = null;
-        this.currentTab = 'dashboard';
-        this.videoStream = null;
-        this.scanning = false;
-        
-        this.init();
-    }
+// app.js - Tekel POS Uygulaması
 
-    async init() {
-        console.log("🚀 TEKEL POS sistemi başlatılıyor...");
-        this.initializeModals();
-        this.setupEventListeners();
-        await this.checkAuth();
-    }
+// Global değişkenler
+let currentUser = null;
+let products = [];
+let cart = [];
+let cashRegister = {
+    isOpen: false,
+    openingBalance: 0,
+    currentBalance: 0,
+    cashSales: 0,
+    cardSales: 0
+};
 
-    // MODAL YÖNETİMİ - TÜM MODALLAR TANIMLI
-    initializeModals() {
-        // Tüm modal elementlerini kontrol et ve hazırla
-        const modalIds = [
-            'loginModal', 'addProductModal', 'cashRegisterModal', 
-            'receiptModal', 'stockAddModal', 'addUserModal'
-        ];
-        
-        modalIds.forEach(modalId => {
-            const modal = document.getElementById(modalId);
-            if (!modal) {
-                console.warn(`Modal #${modalId} bulunamadı!`);
+// DOM yüklendiğinde çalışacak fonksiyonlar
+document.addEventListener('DOMContentLoaded', function() {
+    initializeApp();
+    setupEventListeners();
+    checkAuthentication();
+});
+
+// Uygulama başlatma
+function initializeApp() {
+    console.log('Tekel POS uygulaması başlatılıyor...');
+    
+    // Varsayılan ürünleri yükle (demo)
+    loadDemoProducts();
+    
+    // LocalStorage'dan verileri yükle
+    loadFromLocalStorage();
+    
+    // Dashboard'u güncelle
+    refreshDashboard();
+}
+
+// Event listener'ları kur
+function setupEventListeners() {
+    // Login formu
+    const loginForm = document.getElementById('loginForm');
+    if (loginForm) {
+        loginForm.addEventListener('submit', handleLogin);
+    }
+    
+    // Barkod input enter tuşu
+    const barcodeInput = document.getElementById('barcodeInput');
+    if (barcodeInput) {
+        barcodeInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addProductByBarcode();
             }
         });
     }
-
-    openModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'flex';
-            document.body.classList.add('modal-open');
-            console.log(`Modal açıldı: ${modalId}`);
-            
-            // Input'a focus
-            setTimeout(() => {
-                const input = modal.querySelector('input');
-                if (input) input.focus();
-            }, 100);
-        } else {
-            console.error(`Modal bulunamadı: ${modalId}`);
-        }
-    }
-
-    closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'none';
-            document.body.classList.remove('modal-open');
-            console.log(`Modal kapandı: ${modalId}`);
-        }
-    }
-
-    // EVENT LISTENER'LAR - TÜM BUTONLAR ÇALIŞIYOR
-    setupEventListeners() {
-        console.log("🔗 Event listener'lar bağlanıyor...");
-
-        // Login form
-        this.bindSubmit('loginForm', (e) => {
-            e.preventDefault();
-            this.login();
+    
+    // Navigation click events
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+        item.addEventListener('click', function() {
+            const tabName = this.getAttribute('data-tab');
+            switchTab(tabName);
         });
-
-        // Barkod input - Enter tuşu
-        this.bindKeypress('barcodeInput', (e) => {
-            if (e.key === 'Enter') this.addProductByBarcode();
+    });
+    
+    // Admin tab butonları
+    const adminTabBtns = document.querySelectorAll('.admin-tab-btn');
+    adminTabBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const tabName = this.getAttribute('data-admin-tab');
+            openAdminTab(tabName);
         });
+    });
+}
 
-        // Nakit miktarı değişikliği
-        this.bindInput('cashAmount', () => this.calculateChange());
-
-        // Ödeme yöntemi değişikliği
-        document.querySelectorAll('input[name="paymentMethod"]').forEach(radio => {
-            radio.addEventListener('change', () => this.toggleCashInput());
-        });
-
-        // Sekme değiştirme
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                const tab = item.getAttribute('data-tab');
-                if (tab) this.openTab(tab);
-            });
-        });
-
-        // Admin sekme değiştirme
-        document.querySelectorAll('.admin-tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.getAttribute('data-admin-tab');
-                if (tab) this.openAdminTab(tab);
-            });
-        });
-
-        // Modal kapatma butonları
-        document.querySelectorAll('.close-modal').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const modal = e.target.closest('.modal');
-                if (modal) this.closeModal(modal.id);
-            });
-        });
-
-        // Modal dışına tıklayınca kapat
-        document.addEventListener('click', (e) => {
-            if (e.target.classList.contains('modal')) {
-                this.closeModal(e.target.id);
-            }
-        });
-
-        // TÜM BUTONLARI BAĞLA
-        this.bindAllButtons();
+// Kimlik doğrulama kontrolü
+function checkAuthentication() {
+    const savedUser = localStorage.getItem('currentUser');
+    if (savedUser) {
+        currentUser = JSON.parse(savedUser);
+        showApp();
+    } else {
+        showLogin();
     }
+}
 
-    bindAllButtons() {
-        // Login butonları
-        this.bindClick('loginBtn', () => this.login());
-        
-        // Çıkış butonu
-        this.bindClick('logoutBtn', () => this.logout());
-        
-        // Satış butonları
-        this.bindClick('addProductBtn', () => this.addProductByBarcode());
-        this.bindClick('completeSaleBtn', () => this.completeSale());
-        
-        // Kasa butonları
-        this.bindClick('openCashBtn', () => this.openCashRegisterModal());
-        this.bindClick('closeCashBtn', () => this.closeCashRegisterModal());
-        this.bindClick('openCashConfirmBtn', () => this.openCash());
-        this.bindClick('closeCashConfirmBtn', () => this.closeCash());
-        
-        // Ürün butonları
-        this.bindClick('newProductBtn', () => this.openAddProductModal());
-        this.bindClick('addProductConfirmBtn', () => this.addNewProduct());
-        
-        // Stok butonları
-        this.bindClick('quickStockAddBtn', () => this.quickStockAdd());
-        this.bindClick('addManualBarcodeBtn', () => this.addManualBarcode());
-        
-        // Admin butonları
-        this.bindClick('createUserBtn', () => this.createNewUser());
-        this.bindClick('refreshAuditBtn', () => this.loadAuditLogs());
-        this.bindClick('createBackupBtn', () => this.createBackup());
-
-        // Kamera butonları
-        this.bindClick('startCameraBtn', () => this.startRealCamera());
-        this.bindClick('stopCameraBtn', () => this.stopCamera());
-
-        // Rapor butonları
-        this.bindClick('filterReportsBtn', () => this.loadSalesReport());
-
-        // Stok kaydetme butonları - dinamik olarak bağlanacak
-        this.bindDynamicButtons();
-    }
-
-    bindDynamicButtons() {
-        // Dinamik olarak oluşturulan butonlar için event delegation
-        document.addEventListener('click', (e) => {
-            // Stok kaydet butonları
-            if (e.target.classList.contains('save-stock-btn')) {
-                const barcode = e.target.getAttribute('data-barcode');
-                if (barcode) this.saveStock(barcode);
-                return;
-            }
-
-            // Hızlı stok ekle butonları
-            if (e.target.classList.contains('quick-add-stock')) {
-                const barcode = e.target.getAttribute('data-barcode');
-                const quantity = parseInt(e.target.getAttribute('data-quantity') || '1');
-                if (barcode) this.quickAddStock(barcode, quantity);
-                return;
-            }
-
-            // Sepet quantity butonları
-            if (e.target.classList.contains('quantity-btn')) {
-                const action = e.target.textContent;
-                const itemElement = e.target.closest('.cart-item');
-                if (itemElement) {
-                    const barcode = itemElement.querySelector('.barcode')?.textContent;
-                    if (barcode) {
-                        if (action === '-') this.updateCartQuantity(barcode, -1);
-                        else if (action === '+') this.updateCartQuantity(barcode, 1);
-                    }
-                }
-                return;
-            }
-
-            // Sepetten kaldır butonları
-            if (e.target.classList.contains('remove-btn') || e.target.closest('.remove-btn')) {
-                const itemElement = e.target.closest('.cart-item');
-                if (itemElement) {
-                    const barcode = itemElement.querySelector('.barcode')?.textContent;
-                    if (barcode) this.removeFromCart(barcode);
-                }
-                return;
-            }
-        });
-    }
-
-    bindClick(id, handler) {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('click', handler);
-        } else {
-            console.warn(`Buton bulunamadı: #${id}`);
-        }
-    }
-
-    bindSubmit(id, handler) {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('submit', handler);
-        }
-    }
-
-    bindKeypress(id, handler) {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('keypress', handler);
-        }
-    }
-
-    bindInput(id, handler) {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('input', handler);
-        }
-    }
-
-    // AUTH YÖNETİMİ
-    async checkAuth() {
-        const userData = localStorage.getItem('userData');
-        if (userData) {
-            try {
-                this.currentUser = JSON.parse(userData);
-                this.showApp();
-                await this.loadInitialData();
-            } catch (error) {
-                console.error("Kullanıcı verisi okunamadı:", error);
-                this.showLogin();
-            }
-        } else {
-            this.showLogin();
-        }
-    }
-
-    showLogin() {
-        const loginModal = document.getElementById('loginModal');
-        const appContainer = document.querySelector('.app-container');
-        
-        if (loginModal) loginModal.style.display = 'flex';
-        if (appContainer) appContainer.style.display = 'none';
-        
-        this.closeAllModalsExcept('loginModal');
-        
-        setTimeout(() => {
-            const usernameInput = document.getElementById('username');
-            if (usernameInput) usernameInput.focus();
-        }, 100);
-    }
-
-    showApp() {
-        const loginModal = document.getElementById('loginModal');
-        const appContainer = document.querySelector('.app-container');
-        
-        if (loginModal) loginModal.style.display = 'none';
-        if (appContainer) appContainer.style.display = 'flex';
-        
-        this.updateUserInfo();
-        this.openTab('dashboard');
-    }
-
-    updateUserInfo() {
-        const currentUserEl = document.getElementById('currentUser');
-        const currentRoleEl = document.getElementById('currentRole');
-        
-        if (currentUserEl && this.currentUser) {
-            currentUserEl.textContent = this.currentUser.full_name;
-        }
-        if (currentRoleEl && this.currentUser) {
-            currentRoleEl.textContent = this.getRoleText(this.currentUser.role);
-        }
-        
-        // Admin yetkilerini kontrol et
-        if (this.currentUser && this.currentUser.role !== 'admin') {
-            document.querySelectorAll('.admin-only').forEach(el => {
-                el.style.display = 'none';
-            });
-        } else {
-            document.querySelectorAll('.admin-only').forEach(el => {
-                el.style.display = 'block';
-            });
-        }
-    }
-
-    closeAllModalsExcept(exceptModalId) {
-        const modals = document.querySelectorAll('.modal');
-        modals.forEach(modal => {
-            if (modal.id !== exceptModalId) {
-                modal.style.display = 'none';
-            }
-        });
-        document.body.classList.remove('modal-open');
-    }
-
-    getRoleText(role) {
-        const roles = {
-            'admin': 'Yönetici',
-            'user': 'Personel', 
-            'cashier': 'Kasiyer'
+// Login işlemi
+function handleLogin(event) {
+    event.preventDefault();
+    
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    
+    // Basit login kontrolü (gerçek uygulamada sunucu tarafında doğrulama yapılmalı)
+    if (username === 'admin' && password === 'admin123') {
+        currentUser = {
+            username: username,
+            role: 'admin',
+            fullName: 'Sistem Yöneticisi'
         };
-        return roles[role] || role;
+        
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        showApp();
+        showStatus('Başarıyla giriş yapıldı!', 'success');
+    } else {
+        showStatus('Geçersiz kullanıcı adı veya şifre!', 'error');
     }
+}
 
-    async login() {
-        const username = document.getElementById('username')?.value;
-        const password = document.getElementById('password')?.value;
+// Login ekranını göster
+function showLogin() {
+    document.getElementById('loginModal').style.display = 'block';
+    document.querySelector('.app-container').style.display = 'none';
+}
 
-        if (!username || !password) {
-            this.showStatus('Kullanıcı adı ve şifre gerekli', 'error');
+// Uygulama ekranını göster
+function showApp() {
+    document.getElementById('loginModal').style.display = 'none';
+    document.querySelector('.app-container').style.display = 'flex';
+    
+    // Kullanıcı bilgilerini güncelle
+    document.getElementById('currentUser').textContent = currentUser.fullName || currentUser.username;
+    document.getElementById('currentRole').textContent = getRoleText(currentUser.role);
+    
+    // Admin özelliklerini kontrol et
+    checkAdminFeatures();
+    
+    // Dashboard'u yenile
+    refreshDashboard();
+}
+
+// Çıkış yap
+function logout() {
+    currentUser = null;
+    localStorage.removeItem('currentUser');
+    cart = [];
+    showLogin();
+    showStatus('Çıkış yapıldı.', 'info');
+}
+
+// Sekme değiştirme
+function switchTab(tabName) {
+    // Tüm tab içeriklerini gizle
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Tüm nav item'ları pasif yap
+    const navItems = document.querySelectorAll('.nav-item');
+    navItems.forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    // Aktif tab'ı göster
+    const activeTab = document.getElementById(tabName);
+    if (activeTab) {
+        activeTab.classList.add('active');
+    }
+    
+    // Aktif nav item'ı işaretle
+    const activeNavItem = document.querySelector(`[data-tab="${tabName}"]`);
+    if (activeNavItem) {
+        activeNavItem.classList.add('active');
+    }
+    
+    // Breadcrumb'u güncelle
+    updateBreadcrumb(tabName);
+    
+    // Tab'a özel yüklemeler
+    switch(tabName) {
+        case 'dashboard':
+            refreshDashboard();
+            break;
+        case 'products':
+            loadProducts();
+            break;
+        case 'inventory':
+            loadInventory();
+            break;
+        case 'sales':
+            // Satış sekmesine özel ayarlar
+            document.getElementById('barcodeInput').focus();
+            break;
+        case 'reports':
+            loadReports();
+            break;
+        case 'cash':
+            loadCashStatus();
+            break;
+        case 'admin':
+            loadAdminData();
+            break;
+    }
+}
+
+// Breadcrumb güncelleme
+function updateBreadcrumb(tabName) {
+    const breadcrumb = document.getElementById('breadcrumb');
+    const tabNames = {
+        'dashboard': 'Dashboard',
+        'sales': 'Satış Yap',
+        'products': 'Ürünler',
+        'inventory': 'Stok Yönetimi',
+        'mobile-stock': 'Mobil Stok Ekle',
+        'reports': 'Raporlar',
+        'cash': 'Kasa',
+        'admin': 'Yönetim'
+    };
+    
+    breadcrumb.textContent = tabNames[tabName] || 'Dashboard';
+}
+
+// Admin özelliklerini kontrol et
+function checkAdminFeatures() {
+    const adminElements = document.querySelectorAll('.admin-only');
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    
+    adminElements.forEach(element => {
+        element.style.display = isAdmin ? 'flex' : 'none';
+    });
+}
+
+// Demo ürünleri yükle
+function loadDemoProducts() {
+    // Eğer localStorage'da ürün yoksa demo ürünleri yükle
+    const savedProducts = localStorage.getItem('products');
+    if (!savedProducts) {
+        products = [
+            {
+                barcode: '8691234567890',
+                name: 'Marlboro Red',
+                price: 45.00,
+                stock: 50,
+                minStock: 10,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567891',
+                name: 'Marlboro Gold',
+                price: 47.50,
+                stock: 30,
+                minStock: 10,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567892',
+                name: 'Camel Yellow',
+                price: 43.00,
+                stock: 25,
+                minStock: 5,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567893',
+                name: 'Winston Blue',
+                price: 44.50,
+                stock: 40,
+                minStock: 8,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567894',
+                name: 'Parliament Night Blue',
+                price: 52.00,
+                stock: 15,
+                minStock: 5,
+                kdv: 18,
+                otv: 0
+            }
+        ];
+        saveToLocalStorage();
+    }
+}
+
+// LocalStorage'dan yükle
+function loadFromLocalStorage() {
+    const savedProducts = localStorage.getItem('products');
+    const savedCart = localStorage.getItem('cart');
+    const savedCashRegister = localStorage.getItem('cashRegister');
+    
+    if (savedProducts) {
+        products = JSON.parse(savedProducts);
+    }
+    
+    if (savedCart) {
+        cart = JSON.parse(savedCart);
+        updateCartDisplay();
+    }
+    
+    if (savedCashRegister) {
+        cashRegister = JSON.parse(savedCashRegister);
+    }
+}
+
+// LocalStorage'a kaydet
+function saveToLocalStorage() {
+    localStorage.setItem('products', JSON.stringify(products));
+    localStorage.setItem('cart', JSON.stringify(cart));
+    localStorage.setItem('cashRegister', JSON.stringify(cashRegister));
+}
+
+// Dashboard'u yenile
+function refreshDashboard() {
+    // İstatistikleri hesapla
+    const todaySales = calculateTodaySales();
+    const totalProducts = products.length;
+    const lowStockCount = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+    const outOfStockCount = products.filter(p => p.stock === 0).length;
+    
+    // İstatistikleri güncelle
+    document.getElementById('todaySales').textContent = todaySales.toFixed(2) + ' TL';
+    document.getElementById('totalProducts').textContent = totalProducts;
+    document.getElementById('lowStockCount').textContent = lowStockCount;
+    document.getElementById('outOfStockCount').textContent = outOfStockCount;
+    
+    // Son satışları ve stok uyarılarını yükle
+    loadRecentSales();
+    loadStockAlerts();
+}
+
+// Bugünkü satışları hesapla
+function calculateTodaySales() {
+    // Demo amaçlı sabit değer
+    // Gerçek uygulamada veritabanından alınmalı
+    return 1250.75;
+}
+
+// Son satışları yükle
+function loadRecentSales() {
+    const recentSalesContainer = document.getElementById('recentSales');
+    // Demo veri
+    recentSalesContainer.innerHTML = `
+        <div class="empty-state">
+            <i class="fas fa-receipt"></i>
+            <p>Henüz satış yapılmadı</p>
+        </div>
+    `;
+}
+
+// Stok uyarılarını yükle
+function loadStockAlerts() {
+    const alertsContainer = document.getElementById('stockAlerts');
+    const lowStockProducts = products.filter(p => p.stock <= p.minStock);
+    
+    if (lowStockProducts.length === 0) {
+        alertsContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-check-circle"></i>
+                <p>Stok uyarısı yok</p>
+            </div>
+        `;
+    } else {
+        let alertsHTML = '';
+        lowStockProducts.forEach(product => {
+            const alertType = product.stock === 0 ? 'danger' : 'warning';
+            alertsHTML += `
+                <div class="alert-item ${alertType}">
+                    <div class="alert-info">
+                        <strong>${product.name}</strong>
+                        <span>Stok: ${product.stock}</span>
+                    </div>
+                    <button class="btn-small" onclick="addStock('${product.barcode}')">Stok Ekle</button>
+                </div>
+            `;
+        });
+        alertsContainer.innerHTML = alertsHTML;
+    }
+}
+
+// Barkod ile ürün ekle
+function addProductByBarcode() {
+    const barcodeInput = document.getElementById('barcodeInput');
+    const barcode = barcodeInput.value.trim();
+    
+    if (!barcode) {
+        showStatus('Lütfen barkod girin!', 'error');
+        return;
+    }
+    
+    const product = products.find(p => p.barcode === barcode);
+    
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    if (product.stock <= 0) {
+        showStatus('Bu ürün stokta yok!', 'error');
+        return;
+    }
+    
+    addToCart(product);
+    barcodeInput.value = '';
+    barcodeInput.focus();
+}
+
+// Sepete ürün ekle
+function addToCart(product) {
+    const existingItem = cart.find(item => item.barcode === product.barcode);
+    
+    if (existingItem) {
+        if (existingItem.quantity >= product.stock) {
+            showStatus('Stok yetersiz!', 'error');
             return;
         }
+        existingItem.quantity += 1;
+    } else {
+        cart.push({
+            ...product,
+            quantity: 1
+        });
+    }
+    
+    updateCartDisplay();
+    showStatus(`${product.name} sepete eklendi!`, 'success');
+}
 
-        try {
-            const response = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ username, password })
-            });
+// Sepet görünümünü güncelle
+function updateCartDisplay() {
+    const cartItemsContainer = document.getElementById('cartItems');
+    const cartCount = document.getElementById('cartCount');
+    const subtotalElement = document.getElementById('subtotal');
+    const kdvAmountElement = document.getElementById('kdvAmount');
+    const totalAmountElement = document.getElementById('totalAmount');
+    
+    // Sepet sayısını güncelle
+    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+    cartCount.textContent = totalItems;
+    
+    if (cart.length === 0) {
+        cartItemsContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-shopping-cart"></i>
+                <p>Sepet boş</p>
+                <small>Ürün eklemek için barkod okutun veya listeden seçin</small>
+            </div>
+        `;
+        
+        subtotalElement.textContent = '0.00 TL';
+        kdvAmountElement.textContent = '0.00 TL';
+        totalAmountElement.textContent = '0.00 TL';
+        return;
+    }
+    
+    // Sepet öğelerini oluştur
+    let cartHTML = '';
+    let subtotal = 0;
+    let totalKdv = 0;
+    
+    cart.forEach(item => {
+        const itemTotal = item.price * item.quantity;
+        const itemKdv = (itemTotal * item.kdv) / 100;
+        
+        subtotal += itemTotal;
+        totalKdv += itemKdv;
+        
+        cartHTML += `
+            <div class="cart-item">
+                <div class="item-info">
+                    <h4>${item.name}</h4>
+                    <div class="item-details">
+                        <span class="price">${item.price.toFixed(2)} TL</span>
+                        <span class="barcode">${item.barcode}</span>
+                    </div>
+                </div>
+                <div class="item-controls">
+                    <div class="quantity-controls">
+                        <button class="btn-quantity" onclick="decreaseQuantity('${item.barcode}')">-</button>
+                        <span class="quantity">${item.quantity}</span>
+                        <button class="btn-quantity" onclick="increaseQuantity('${item.barcode}')">+</button>
+                    </div>
+                    <div class="item-total">${itemTotal.toFixed(2)} TL</div>
+                    <button class="btn-remove" onclick="removeFromCart('${item.barcode}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+    });
+    
+    const total = subtotal + totalKdv;
+    
+    cartItemsContainer.innerHTML = cartHTML;
+    subtotalElement.textContent = subtotal.toFixed(2) + ' TL';
+    kdvAmountElement.textContent = totalKdv.toFixed(2) + ' TL';
+    totalAmountElement.textContent = total.toFixed(2) + ' TL';
+    
+    // Para üstü hesaplamasını tetikle
+    calculateChange();
+    
+    saveToLocalStorage();
+}
 
-            if (!response.ok) {
-                throw new Error('Sunucu hatası');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.currentUser = result.user;
-                localStorage.setItem('userData', JSON.stringify(result.user));
-                this.showApp();
-                await this.loadInitialData();
-                this.showStatus('Başarıyla giriş yapıldı', 'success');
-            } else {
-                this.showStatus(result.message || 'Giriş başarısız', 'error');
-            }
-        } catch (error) {
-            console.error('Login hatası:', error);
-            this.showStatus('Sunucu hatası: ' + error.message, 'error');
+// Miktar artır
+function increaseQuantity(barcode) {
+    const item = cart.find(i => i.barcode === barcode);
+    const product = products.find(p => p.barcode === barcode);
+    
+    if (item && product) {
+        if (item.quantity < product.stock) {
+            item.quantity += 1;
+            updateCartDisplay();
+        } else {
+            showStatus('Stok yetersiz!', 'error');
         }
     }
+}
 
-    logout() {
-        localStorage.removeItem('userData');
-        this.currentUser = null;
-        this.cart = [];
-        this.showLogin();
-        this.showStatus('Çıkış yapıldı', 'success');
+// Miktar azalt
+function decreaseQuantity(barcode) {
+    const item = cart.find(i => i.barcode === barcode);
+    
+    if (item) {
+        if (item.quantity > 1) {
+            item.quantity -= 1;
+        } else {
+            removeFromCart(barcode);
+            return;
+        }
+        updateCartDisplay();
     }
+}
 
-    async loadInitialData() {
-        await this.loadProducts();
-        await this.loadDashboardData();
+// Sepetten ürün çıkar
+function removeFromCart(barcode) {
+    cart = cart.filter(item => item.barcode !== barcode);
+    updateCartDisplay();
+    showStatus('Ürün sepetten çıkarıldı!', 'info');
+}
+
+// Para üstü hesapla
+function calculateChange() {
+    const cashAmount = parseFloat(document.getElementById('cashAmount').value) || 0;
+    const totalAmount = parseFloat(document.getElementById('totalAmount').textContent) || 0;
+    const changeDisplay = document.getElementById('changeDisplay');
+    
+    if (cashAmount >= totalAmount) {
+        const change = cashAmount - totalAmount;
+        changeDisplay.innerHTML = `Para Üstü: <span>${change.toFixed(2)} TL</span>`;
+    } else {
+        changeDisplay.innerHTML = `Para Üstü: <span>0.00 TL</span>`;
     }
+}
 
-    // SEKMELER
-    openTab(tabName) {
-        console.log(`📑 Sekme açılıyor: ${tabName}`);
-        
-        // Eski sekmeyi kapat
-        document.querySelectorAll('.tab-content').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.classList.remove('active');
-        });
+// Nakit input görünümünü değiştir
+function toggleCashInput() {
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+    const cashInputSection = document.getElementById('cashInputSection');
+    
+    if (paymentMethod === 'nakit') {
+        cashInputSection.style.display = 'block';
+    } else {
+        cashInputSection.style.display = 'none';
+    }
+}
 
-        // Yeni sekmeyi aç
-        const tabElement = document.getElementById(tabName);
-        const navElement = document.querySelector(`[data-tab="${tabName}"]`);
-        
-        if (tabElement) tabElement.classList.add('active');
-        if (navElement) navElement.classList.add('active');
-        
-        // Breadcrumb güncelle
-        const breadcrumb = document.getElementById('breadcrumb');
-        if (breadcrumb) breadcrumb.textContent = this.getTabTitle(tabName);
-        
-        this.currentTab = tabName;
+// Satışı tamamla
+function completeSale() {
+    if (cart.length === 0) {
+        showStatus('Sepet boş!', 'error');
+        return;
+    }
+    
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+    const cashAmount = parseFloat(document.getElementById('cashAmount').value) || 0;
+    const totalAmount = parseFloat(document.getElementById('totalAmount').textContent);
+    
+    if (paymentMethod === 'nakit' && cashAmount < totalAmount) {
+        showStatus('Verilen para yetersiz!', 'error');
+        return;
+    }
+    
+    // Stokları güncelle
+    cart.forEach(cartItem => {
+        const product = products.find(p => p.barcode === cartItem.barcode);
+        if (product) {
+            product.stock -= cartItem.quantity;
+        }
+    });
+    
+    // Kasa kaydını güncelle
+    if (cashRegister.isOpen) {
+        if (paymentMethod === 'nakit') {
+            cashRegister.cashSales += totalAmount;
+        } else {
+            cashRegister.cardSales += totalAmount;
+        }
+        cashRegister.currentBalance = cashRegister.openingBalance + cashRegister.cashSales;
+    }
+    
+    // Fiş oluştur
+    const receipt = generateReceipt(paymentMethod, cashAmount);
+    
+    // Sepeti temizle
+    cart = [];
+    updateCartDisplay();
+    
+    // Formu sıfırla
+    document.getElementById('cashAmount').value = '';
+    document.querySelector('input[name="paymentMethod"][value="nakit"]').checked = true;
+    toggleCashInput();
+    
+    // Dashboard'u yenile
+    refreshDashboard();
+    
+    // Fiş göster
+    showReceipt(receipt);
+    
+    showStatus('Satış başarıyla tamamlandı!', 'success');
+    saveToLocalStorage();
+}
 
-        // Sekmeye özel yüklemeler
-        switch(tabName) {
-            case 'dashboard':
-                this.loadDashboardData();
-                break;
-            case 'products':
-                this.loadProducts();
-                break;
-            case 'inventory':
-                this.loadInventory();
-                break;
-            case 'mobile-stock':
-                this.initCamera();
-                break;
-            case 'reports':
-                this.loadReports();
-                break;
-            case 'cash':
-                this.loadCashManagement();
-                break;
-            case 'admin':
-                if (this.currentUser?.role === 'admin') {
-                    this.loadAdminData();
+// Fiş oluştur
+function generateReceipt(paymentMethod, cashAmount) {
+    const totalAmount = parseFloat(document.getElementById('totalAmount').textContent);
+    const change = paymentMethod === 'nakit' ? cashAmount - totalAmount : 0;
+    
+    let receiptHTML = `
+        <div class="receipt">
+            <div class="receipt-header">
+                <h3>TEKEL MARKET</h3>
+                <p>POS Sistemi</p>
+            </div>
+            <div class="receipt-info">
+                <p>Fiş No: ${Date.now()}</p>
+                <p>Tarih: ${new Date().toLocaleString('tr-TR')}</p>
+                <p>Kasiyer: ${currentUser.fullName || currentUser.username}</p>
+            </div>
+            <div class="receipt-items">
+                <table>
+    `;
+    
+    cart.forEach(item => {
+        receiptHTML += `
+            <tr>
+                <td>${item.name} x${item.quantity}</td>
+                <td>${(item.price * item.quantity).toFixed(2)} TL</td>
+            </tr>
+        `;
+    });
+    
+    receiptHTML += `
+                </table>
+            </div>
+            <div class="receipt-totals">
+                <p>Ara Toplam: ${document.getElementById('subtotal').textContent}</p>
+                <p>KDV Toplam: ${document.getElementById('kdvAmount').textContent}</p>
+                <p><strong>Toplam: ${totalAmount.toFixed(2)} TL</strong></p>
+                <p>Ödeme: ${paymentMethod === 'nakit' ? 'Nakit' : 'Kredi Kartı'}</p>
+    `;
+    
+    if (paymentMethod === 'nakit') {
+        receiptHTML += `
+            <p>Verilen: ${cashAmount.toFixed(2)} TL</p>
+            <p>Para Üstü: ${change.toFixed(2)} TL</p>
+        `;
+    }
+    
+    receiptHTML += `
+            </div>
+            <div class="receipt-footer">
+                <p>Teşekkür Ederiz!</p>
+            </div>
+        </div>
+    `;
+    
+    return receiptHTML;
+}
+
+// Fiş göster
+function showReceipt(receiptHTML) {
+    document.getElementById('receiptContent').innerHTML = receiptHTML;
+    openModal('receiptModal');
+}
+
+// Modal açma
+function openModal(modalId) {
+    document.getElementById(modalId).style.display = 'block';
+}
+
+// Modal kapama
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+// Fiş yazdır
+function printReceipt() {
+    const receiptContent = document.getElementById('receiptContent').innerHTML;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Fiş Yazdır</title>
+            <style>
+                body { font-family: Arial, sans-serif; font-size: 12px; }
+                .receipt { width: 80mm; margin: 0 auto; }
+                .receipt-header { text-align: center; margin-bottom: 10px; }
+                .receipt-header h3 { margin: 0; font-size: 14px; }
+                .receipt-info p { margin: 2px 0; }
+                .receipt-items table { width: 100%; border-collapse: collapse; }
+                .receipt-items td { padding: 2px 0; border-bottom: 1px dashed #ccc; }
+                .receipt-totals { margin-top: 10px; border-top: 2px solid #000; padding-top: 5px; }
+                .receipt-totals p { margin: 3px 0; }
+                .receipt-footer { text-align: center; margin-top: 10px; font-style: italic; }
+                @media print {
+                    body { margin: 0; padding: 0; }
+                    .receipt { width: 80mm !important; }
                 }
-                break;
-        }
-    }
+            </style>
+        </head>
+        <body onload="window.print(); window.close();">
+            ${receiptContent}
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+}
 
-    getTabTitle(tabName) {
-        const titles = {
-            'dashboard': 'Dashboard',
-            'sales': 'Satış Yap',
-            'products': 'Ürünler',
-            'inventory': 'Stok Yönetimi',
-            'mobile-stock': 'Mobil Stok Ekle',
-            'reports': 'Raporlar',
-            'cash': 'Kasa Yönetimi',
-            'admin': 'Sistem Yönetimi'
-        };
-        return titles[tabName] || tabName;
-    }
-
-    openAdminTab(tabName) {
-        // Admin sekmelerini kapat
-        document.querySelectorAll('.admin-tab-content').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        document.querySelectorAll('.admin-tab-btn').forEach(btn => {
-            btn.classList.remove('active');
-        });
-
-        // Yeni admin sekmesini aç
-        const tabElement = document.getElementById(`admin-${tabName}`);
-        const btnElement = document.querySelector(`[data-admin-tab="${tabName}"]`);
-        
-        if (tabElement) tabElement.classList.add('active');
-        if (btnElement) btnElement.classList.add('active');
-
-        // Admin sekmesine özel yüklemeler
-        switch(tabName) {
-            case 'users':
-                this.loadUsers();
-                break;
-            case 'audit':
-                this.loadAuditLogs();
-                break;
-            case 'backup':
-                this.loadBackupInfo();
-                break;
-        }
-    }
-
-    // ÜRÜN YÖNETİMİ - API BAĞLANTILI
-    async loadProducts() {
-        try {
-            const token = this.currentUser?.id;
-            const response = await fetch('/api/products', {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error('Ürünler yüklenemedi');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.products = result.products;
-                this.renderProducts();
-                this.renderProductsTable();
-            } else {
-                this.showStatus('Ürünler yüklenirken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Ürün yükleme hatası:', error);
-            this.showStatus('Ürünler yüklenirken hata: ' + error.message, 'error');
-            // Hata durumunda boş ürün listesi
-            this.products = [];
-            this.renderProducts();
-            this.renderProductsTable();
-        }
-    }
-
-    renderProducts() {
-        const grid = document.getElementById('productGrid');
-        if (!grid) return;
-
-        if (this.products.length === 0) {
-            grid.innerHTML = `
-                <div class="empty-state">
+// Ürünleri yükle
+function loadProducts() {
+    const tableBody = document.getElementById('productsTableBody');
+    
+    if (products.length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="empty-state">
                     <i class="fas fa-box-open"></i>
                     <p>Henüz ürün eklenmemiş</p>
-                    <small>Yeni ürün ekle butonuna tıklayarak ürün ekleyin</small>
-                </div>
-            `;
-            return;
-        }
-
-        grid.innerHTML = this.products.map(product => `
-            <div class="product-card">
-                <div class="product-info">
-                    <h4>${product.name}</h4>
-                    <div class="product-details">
-                        <span class="price">${product.price} TL</span>
-                        <span class="stock ${product.quantity <= 5 ? 'warning' : ''}">Stok: ${product.quantity}</span>
-                    </div>
-                    <div class="barcode">${product.barcode}</div>
-                </div>
-                <button class="btn-primary btn-small add-to-cart-btn" data-barcode="${product.barcode}">
-                    <i class="fas fa-cart-plus"></i> Ekle
-                </button>
-            </div>
-        `).join('');
-
-        // Sepete ekle butonlarını bağla
-        grid.querySelectorAll('.add-to-cart-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const barcode = e.target.getAttribute('data-barcode') || 
-                               e.target.closest('.add-to-cart-btn').getAttribute('data-barcode');
-                if (barcode) this.addToCart(barcode);
-            });
-        });
+                </td>
+            </tr>
+        `;
+        return;
     }
-
-    renderProductsTable() {
-        const tbody = document.getElementById('productsTableBody');
-        if (!tbody) return;
-
-        if (this.products.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" class="empty-state">
-                        <i class="fas fa-box-open"></i>
-                        <p>Henüz ürün eklenmemiş</p>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = this.products.map(product => {
-            const statusClass = product.quantity === 0 ? 'danger' : 
-                              product.quantity <= 5 ? 'warning' : 'success';
-            const statusText = product.quantity === 0 ? 'Stokta Yok' : 
-                             product.quantity <= 5 ? 'Az Stok' : 'Stokta Var';
-            
-            return `
-                <tr>
-                    <td>${product.barcode}</td>
-                    <td><strong>${product.name}</strong></td>
-                    <td>${product.price} TL</td>
-                    <td>
-                        <input type="number" 
-                               class="stock-input" 
-                               value="${product.quantity}" 
-                               min="0"
-                               data-barcode="${product.barcode}"
-                               style="width: 80px; padding: 4px;">
-                    </td>
-                    <td>%${product.kdv || 18}</td>
-                    <td>
-                        <span class="status-badge ${statusClass}">${statusText}</span>
-                    </td>
-                    <td>
-                        <button class="btn-primary btn-small save-stock-btn" data-barcode="${product.barcode}">
-                            Kaydet
+    
+    let tableHTML = '';
+    products.forEach(product => {
+        const status = getStockStatus(product);
+        tableHTML += `
+            <tr>
+                <td>${product.barcode}</td>
+                <td>${product.name}</td>
+                <td>${product.price.toFixed(2)} TL</td>
+                <td>${product.stock}</td>
+                <td>%${product.kdv}</td>
+                <td><span class="status-badge ${status.class}">${status.text}</span></td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn-small btn-primary" onclick="editProduct('${product.barcode}')">
+                            <i class="fas fa-edit"></i>
                         </button>
-                    </td>
-                    <td>
-                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="1">
-                            +1
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    // SEPET İŞLEMLERİ
-    async addProductByBarcode() {
-        const barcodeInput = document.getElementById('barcodeInput');
-        const barcode = barcodeInput?.value.trim();
-        
-        if (!barcode) {
-            this.showStatus('Lütfen barkod girin', 'warning');
-            return;
-        }
-
-        const product = this.products.find(p => p.barcode === barcode);
-        if (!product) {
-            this.showStatus('Ürün bulunamadı! Yeni ürün eklemek için "Ürünler" sekmesine gidin.', 'error');
-            if (barcodeInput) barcodeInput.value = '';
-            return;
-        }
-
-        this.addToCart(product.barcode);
-        if (barcodeInput) {
-            barcodeInput.value = '';
-            barcodeInput.focus();
-        }
-    }
-
-    addToCart(barcode) {
-        const product = this.products.find(p => p.barcode === barcode);
-        if (!product) {
-            this.showStatus('Ürün bulunamadı', 'error');
-            return;
-        }
-
-        if (product.quantity === 0) {
-            this.showStatus('Bu ürün stokta yok', 'error');
-            return;
-        }
-
-        const existingItem = this.cart.find(item => item.barcode === barcode);
-        if (existingItem) {
-            if (existingItem.quantity >= product.quantity) {
-                this.showStatus('Stok yetersiz', 'error');
-                return;
-            }
-            existingItem.quantity++;
-        } else {
-            this.cart.push({
-                barcode: product.barcode,
-                name: product.name,
-                price: product.price,
-                quantity: 1
-            });
-        }
-
-        this.renderCart();
-        this.showStatus(`${product.name} sepete eklendi`, 'success');
-    }
-
-    removeFromCart(barcode) {
-        this.cart = this.cart.filter(item => item.barcode !== barcode);
-        this.renderCart();
-        this.showStatus('Ürün sepetten kaldırıldı', 'success');
-    }
-
-    updateCartQuantity(barcode, change) {
-        const item = this.cart.find(item => item.barcode === barcode);
-        if (!item) return;
-
-        const product = this.products.find(p => p.barcode === barcode);
-        if (!product) return;
-
-        const newQuantity = item.quantity + change;
-        
-        if (newQuantity <= 0) {
-            this.removeFromCart(barcode);
-            return;
-        }
-
-        if (newQuantity > product.quantity) {
-            this.showStatus('Stok yetersiz', 'error');
-            return;
-        }
-
-        item.quantity = newQuantity;
-        this.renderCart();
-    }
-
-    renderCart() {
-        const cartItems = document.getElementById('cartItems');
-        const cartCount = document.getElementById('cartCount');
-        const subtotalEl = document.getElementById('subtotal');
-        const kdvAmountEl = document.getElementById('kdvAmount');
-        const totalAmountEl = document.getElementById('totalAmount');
-        
-        if (!cartItems) return;
-
-        const totalItems = this.cart.reduce((sum, item) => sum + item.quantity, 0);
-        if (cartCount) cartCount.textContent = totalItems;
-        
-        if (this.cart.length === 0) {
-            cartItems.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-shopping-cart"></i>
-                    <p>Sepet boş</p>
-                    <small>Ürün eklemek için barkod okutun veya listeden seçin</small>
-                </div>
-            `;
-            if (subtotalEl) subtotalEl.textContent = '0.00 TL';
-            if (kdvAmountEl) kdvAmountEl.textContent = '0.00 TL';
-            if (totalAmountEl) totalAmountEl.textContent = '0.00 TL';
-            return;
-        }
-
-        cartItems.innerHTML = this.cart.map(item => {
-            const itemTotal = item.price * item.quantity;
-            return `
-                <div class="cart-item">
-                    <div class="cart-item-info">
-                        <h4>${item.name}</h4>
-                        <div class="item-details">
-                            <span class="price">${item.price} TL</span>
-                            <span class="barcode">${item.barcode}</span>
-                        </div>
-                    </div>
-                    <div class="cart-item-controls">
-                        <div class="quantity-controls">
-                            <button class="quantity-btn">-</button>
-                            <span class="quantity">${item.quantity}</span>
-                            <button class="quantity-btn">+</button>
-                        </div>
-                        <button class="remove-btn">
+                        <button class="btn-small btn-danger" onclick="deleteProduct('${product.barcode}')">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
-                </div>
-            `;
-        }).join('');
-
-        const subtotal = this.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        const kdvRate = 0.18;
-        const kdvAmount = subtotal * kdvRate;
-        const total = subtotal + kdvAmount;
-
-        if (subtotalEl) subtotalEl.textContent = subtotal.toFixed(2) + ' TL';
-        if (kdvAmountEl) kdvAmountEl.textContent = kdvAmount.toFixed(2) + ' TL';
-        if (totalAmountEl) totalAmountEl.textContent = total.toFixed(2) + ' TL';
-
-        this.calculateChange();
-    }
-
-    calculateChange() {
-        const cashAmount = parseFloat(document.getElementById('cashAmount')?.value) || 0;
-        const totalText = document.getElementById('totalAmount')?.textContent || '0.00 TL';
-        const total = parseFloat(totalText) || 0;
-        const changeDisplay = document.getElementById('changeDisplay');
-        
-        if (changeDisplay) {
-            const change = cashAmount - total;
-            changeDisplay.innerHTML = `Para Üstü: <span class="${change >= 0 ? 'positive' : 'negative'}">${change.toFixed(2)} TL</span>`;
-        }
-    }
-
-    toggleCashInput() {
-        const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value;
-        const cashInputSection = document.getElementById('cashInputSection');
-        
-        if (cashInputSection) {
-            cashInputSection.style.display = paymentMethod === 'nakit' ? 'block' : 'none';
-        }
-        
-        if (paymentMethod !== 'nakit') {
-            const cashAmount = document.getElementById('cashAmount');
-            if (cashAmount) cashAmount.value = '';
-            this.calculateChange();
-        }
-    }
-
-    async completeSale() {
-        if (this.cart.length === 0) {
-            this.showStatus('Sepet boş', 'error');
-            return;
-        }
-
-        const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value;
-        const cashAmount = parseFloat(document.getElementById('cashAmount')?.value) || 0;
-        const totalText = document.getElementById('totalAmount')?.textContent || '0.00 TL';
-        const total = parseFloat(totalText);
-        
-        if (paymentMethod === 'nakit' && cashAmount < total) {
-            this.showStatus('Verilen para toplam tutardan az olamaz', 'error');
-            return;
-        }
-
-        const saleData = {
-            items: this.cart,
-            total: total,
-            payment_method: paymentMethod,
-            cash_amount: paymentMethod === 'nakit' ? cashAmount : 0,
-            credit_card_amount: paymentMethod === 'kredi' ? total : 0,
-            change_amount: paymentMethod === 'nakit' ? (cashAmount - total) : 0,
-            user_id: this.currentUser.id
-        };
-
-        try {
-            const response = await fetch('/api/sale', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify(saleData)
-            });
-
-            if (!response.ok) {
-                throw new Error('Satış kaydedilemedi');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus(`Satış başarıyla tamamlandı! Fiş No: ${result.sale_id}`, 'success');
-                this.cart = [];
-                this.renderCart();
-                await this.loadProducts();
-                await this.loadDashboardData();
-                
-                const barcodeInput = document.getElementById('barcodeInput');
-                if (barcodeInput) {
-                    barcodeInput.value = '';
-                    barcodeInput.focus();
-                }
-            } else {
-                this.showStatus('Satış sırasında hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Satış hatası:', error);
-            this.showStatus('Satış sırasında hata: ' + error.message, 'error');
-        }
-    }
-
-    // STOK YÖNETİMİ
-    async saveStock(barcode) {
-        const input = document.querySelector(`.stock-input[data-barcode="${barcode}"]`);
-        if (!input) {
-            this.showStatus('Stok inputu bulunamadı', 'error');
-            return;
-        }
-
-        const newQuantity = parseInt(input.value) || 0;
-
-        if (newQuantity < 0) {
-            this.showStatus('Stok miktarı negatif olamaz', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/stock/update', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify({
-                    barcode: barcode,
-                    quantity: newQuantity
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Stok güncellenemedi');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus('Stok güncellendi', 'success');
-                await this.loadProducts();
-            } else {
-                this.showStatus('Stok güncellenirken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Stok güncelleme hatası:', error);
-            this.showStatus('Stok güncellenirken hata: ' + error.message, 'error');
-        }
-    }
-
-    async quickAddStock(barcode, quantity) {
-        try {
-            const response = await fetch('/api/stock/add', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify({
-                    barcode: barcode,
-                    quantity: quantity
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Stok eklenemedi');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus(`${quantity} adet stok eklendi`, 'success');
-                await this.loadProducts();
-            } else {
-                this.showStatus('Stok eklenirken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Stok ekleme hatası:', error);
-            this.showStatus('Stok eklenirken hata: ' + error.message, 'error');
-        }
-    }
-
-    // YENİ ÜRÜN EKLEME
-    openAddProductModal() {
-        // Formu temizle
-        const form = document.getElementById('addProductForm');
-        if (form) form.reset();
-        
-        this.openModal('addProductModal');
-    }
-
-    async addNewProduct() {
-        const barcode = document.getElementById('newProductBarcode')?.value.trim();
-        const name = document.getElementById('newProductName')?.value.trim();
-        const price = parseFloat(document.getElementById('newProductPrice')?.value) || 0;
-        const quantity = parseInt(document.getElementById('newProductQuantity')?.value) || 1;
-        const kdv = parseFloat(document.getElementById('newProductKDV')?.value) || 18;
-
-        if (!barcode || !name || price <= 0) {
-            this.showStatus('Lütfen zorunlu alanları doldurun (Barkod, Ürün Adı, Fiyat)', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/products', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify({
-                    barcode: barcode,
-                    name: name,
-                    price: price,
-                    quantity: quantity,
-                    kdv: kdv
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Ürün eklenemedi');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus('Ürün başarıyla eklendi', 'success');
-                this.closeModal('addProductModal');
-                await this.loadProducts();
-            } else {
-                this.showStatus('Ürün eklenirken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Ürün ekleme hatası:', error);
-            this.showStatus('Ürün eklenirken hata: ' + error.message, 'error');
-        }
-    }
-
-    // KASA YÖNETİMİ
-    openCashRegisterModal() {
-        this.openModal('cashRegisterModal');
-    }
-
-    closeCashRegisterModal() {
-        this.closeModal('cashRegisterModal');
-    }
-
-    async openCash() {
-        const amount = parseFloat(document.getElementById('openCashAmount')?.value) || 0;
-        
-        if (amount <= 0) {
-            this.showStatus('Geçerli bir miktar girin', 'error');
-            return;
-        }
-        
-        try {
-            const response = await fetch('/api/cash/open', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify({
-                    initial_amount: amount
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Kasa açılamadı');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus(`Kasa açıldı: ${amount.toFixed(2)} TL`, 'success');
-                this.closeModal('cashRegisterModal');
-                await this.loadCashManagement();
-            } else {
-                this.showStatus('Kasa açılırken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Kasa açma hatası:', error);
-            this.showStatus('Kasa açılırken hata: ' + error.message, 'error');
-        }
-    }
-
-    async closeCash() {
-        try {
-            const response = await fetch('/api/cash/close', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error('Kasa kapatılamadı');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus('Kasa kapandı', 'success');
-                this.closeModal('cashRegisterModal');
-                await this.loadCashManagement();
-            } else {
-                this.showStatus('Kasa kapatılırken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Kasa kapatma hatası:', error);
-            this.showStatus('Kasa kapatılırken hata: ' + error.message, 'error');
-        }
-    }
-
-    async loadCashManagement() {
-        try {
-            const response = await fetch('/api/cash/status', {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.updateCashUI(result.cash_status);
-                }
-            }
-        } catch (error) {
-            console.error('Kasa durumu yükleme hatası:', error);
-        }
-    }
-
-    updateCashUI(cashStatus) {
-        const openBtn = document.getElementById('openCashBtn');
-        const closeBtn = document.getElementById('closeCashBtn');
-        const statusBadge = document.getElementById('cashStatusBadge');
-        const currentAmount = document.getElementById('currentCashAmount');
-
-        if (cashStatus.is_open) {
-            if (statusBadge) {
-                statusBadge.className = 'status-badge success';
-                statusBadge.textContent = 'Açık';
-            }
-            if (openBtn) openBtn.style.display = 'none';
-            if (closeBtn) closeBtn.style.display = 'inline-block';
-            if (currentAmount) {
-                currentAmount.textContent = cashStatus.current_amount + ' TL';
-            }
-        } else {
-            if (statusBadge) {
-                statusBadge.className = 'status-badge danger';
-                statusBadge.textContent = 'Kapalı';
-            }
-            if (openBtn) openBtn.style.display = 'inline-block';
-            if (closeBtn) closeBtn.style.display = 'none';
-            if (currentAmount) {
-                currentAmount.textContent = '0.00 TL';
-            }
-        }
-    }
-
-    // DASHBOARD
-    async loadDashboardData() {
-        try {
-            const response = await fetch('/api/dashboard', {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.updateDashboard(result.data);
-                }
-            }
-        } catch (error) {
-            console.error('Dashboard yükleme hatası:', error);
-        }
-    }
-
-    updateDashboard(data) {
-        const todaySales = document.getElementById('todaySales');
-        const totalProducts = document.getElementById('totalProducts');
-        const lowStockCount = document.getElementById('lowStockCount');
-        const outOfStockCount = document.getElementById('outOfStockCount');
-        
-        if (todaySales) todaySales.textContent = (data.daily_sales || 0).toFixed(2) + ' TL';
-        if (totalProducts) totalProducts.textContent = data.total_products || 0;
-        if (lowStockCount) lowStockCount.textContent = data.low_stock_count || 0;
-        if (outOfStockCount) outOfStockCount.textContent = data.out_of_stock_count || 0;
-    }
-
-    // ENVANTER
-    async loadInventory() {
-        await this.loadProducts();
-        this.renderInventoryTable();
-    }
-
-    renderInventoryTable() {
-        const tbody = document.getElementById('inventoryTableBody');
-        if (!tbody) return;
-
-        if (this.products.length === 0) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="8" class="empty-state">
-                        <i class="fas fa-warehouse"></i>
-                        <p>Stok bilgisi bulunamadı</p>
-                    </td>
-                </tr>
-            `;
-            return;
-        }
-
-        tbody.innerHTML = this.products.map(product => {
-            const statusClass = product.quantity === 0 ? 'danger' : 
-                              product.quantity <= 5 ? 'warning' : 'success';
-            const statusText = product.quantity === 0 ? 'Stokta Yok' : 
-                             product.quantity <= 5 ? 'Az Stok' : 'Stokta Var';
-            
-            return `
-                <tr>
-                    <td>${product.barcode}</td>
-                    <td><strong>${product.name}</strong></td>
-                    <td>${product.price} TL</td>
-                    <td>
-                        <input type="number" 
-                               class="stock-input" 
-                               value="${product.quantity}" 
-                               min="0"
-                               data-barcode="${product.barcode}"
-                               style="width: 80px; padding: 4px;">
-                    </td>
-                    <td>${product.min_stock_level || 5}</td>
-                    <td>
-                        <span class="status-badge ${statusClass}">${statusText}</span>
-                    </td>
-                    <td>
-                        <button class="btn-primary btn-small save-stock-btn" data-barcode="${product.barcode}">
-                            Kaydet
-                        </button>
-                    </td>
-                    <td>
-                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="1">
-                            +1
-                        </button>
-                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="5">
-                            +5
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    }
-
-    // KAMERA FONKSİYONLARI - GERÇEK KAMERA
-    initCamera() {
-        console.log("📱 Kamera sistemi hazırlanıyor...");
-        this.resetCameraUI();
-        this.showManualBarcodeInput();
-    }
-
-    resetCameraUI() {
-        const statusEl = document.getElementById('cameraStatus');
-        if (statusEl) statusEl.innerHTML = '<i class="fas fa-camera"></i> Kamera hazır';
-    }
-
-    async startRealCamera() {
-        console.log("📷 Kamera başlatılıyor...");
-        
-        try {
-            this.videoStream = await navigator.mediaDevices.getUserMedia({ 
-                video: { 
-                    facingMode: 'environment',
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 }
-                } 
-            });
-            
-            const videoElement = document.getElementById('videoElement');
-            if (videoElement) {
-                videoElement.srcObject = this.videoStream;
-                
-                const statusEl = document.getElementById('cameraStatus');
-                if (statusEl) statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Kamera aktif';
-                
-                this.scanning = true;
-                this.startBarcodeDetection();
-            }
-        } catch (error) {
-            console.error("Kamera hatası:", error);
-            this.showCameraError();
-        }
-    }
-
-    startBarcodeDetection() {
-        // Barkod tespiti için interval
-        this.scanInterval = setInterval(() => {
-            if (!this.scanning) return;
-            this.detectBarcode();
-        }, 1000);
-    }
-
-    detectBarcode() {
-        // Gerçek barkod tespiti burada yapılacak
-        // Şu anlık manuel giriş kullanılıyor
-    }
-
-    showManualBarcodeInput() {
-        const cameraSection = document.getElementById('cameraSection');
-        if (cameraSection && !document.getElementById('manualBarcodeSection')) {
-            const manualInputHTML = `
-                <div class="manual-barcode-section" id="manualBarcodeSection" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
-                    <h4><i class="fas fa-keyboard"></i> Manuel Barkod Girişi</h4>
-                    <p style="margin-bottom: 15px; color: #666;">Barkodu manuel olarak girin:</p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="text" 
-                               id="manualBarcodeInput" 
-                               placeholder="Barkodu buraya girin" 
-                               style="flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 16px;">
-                        <button class="btn-primary" id="addManualBarcodeBtn">
-                            <i class="fas fa-check"></i> Ekle
-                        </button>
-                    </div>
-                </div>
-            `;
-            cameraSection.insertAdjacentHTML('beforeend', manualInputHTML);
-        }
-    }
-
-    addManualBarcode() {
-        const input = document.getElementById('manualBarcodeInput');
-        const barcode = input?.value.trim();
-        
-        if (!barcode) {
-            this.showStatus('Lütfen barkod girin', 'error');
-            return;
-        }
-
-        this.handleScannedBarcode(barcode);
-        if (input) input.value = '';
-    }
-
-    showCameraError() {
-        const statusEl = document.getElementById('cameraStatus');
-        if (statusEl) {
-            statusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Kamera erişimi reddedildi';
-        }
-        this.showStatus('Kamera erişimi için izin gerekli. Manuel barkod girişini kullanabilirsiniz.', 'warning');
-    }
-
-    stopCamera() {
-        console.log("📷 Kamera durduruluyor...");
-        this.scanning = false;
-        
-        if (this.scanInterval) {
-            clearInterval(this.scanInterval);
-            this.scanInterval = null;
-        }
-        
-        if (this.videoStream) {
-            this.videoStream.getTracks().forEach(track => track.stop());
-            this.videoStream = null;
-        }
-        
-        const videoElement = document.getElementById('videoElement');
-        if (videoElement) {
-            videoElement.srcObject = null;
-        }
-        
-        const statusEl = document.getElementById('cameraStatus');
-        if (statusEl) statusEl.innerHTML = '<i class="fas fa-camera"></i> Kamera durduruldu';
-    }
-
-    handleScannedBarcode(barcode) {
-        console.log("📦 Barkod taranan:", barcode);
-        
-        // Ürün kontrolü
-        const product = this.products.find(p => p.barcode === barcode);
-        
-        if (product) {
-            // Ürün var - sepete ekle
-            this.addToCart(barcode);
-        } else {
-            // Ürün yok - yeni ürün ekleme modal'ını aç
-            this.openNewProductModal(barcode);
-        }
-    }
-
-    openNewProductModal(barcode) {
-        document.getElementById('newProductBarcode').value = barcode;
-        this.openModal('addProductModal');
-        this.showStatus('Ürün bulunamadı. Yeni ürün olarak ekleyebilirsiniz.', 'info');
-    }
-
-    // HIZLI STOK EKLEME
-    async quickStockAdd() {
-        const barcodeInput = document.getElementById('quickBarcodeInput');
-        const barcode = barcodeInput?.value.trim();
-        
-        if (!barcode) {
-            this.showStatus('Lütfen barkod girin', 'error');
-            return;
-        }
-        
-        await this.quickAddStock(barcode, 1);
-        if (barcodeInput) barcodeInput.value = '';
-    }
-
-    // RAPORLAR
-    async loadReports() {
-        await this.loadSalesReport();
-    }
-
-    async loadSalesReport() {
-        try {
-            const startDate = document.getElementById('reportStartDate')?.value || 
-                new Date().toISOString().split('T')[0];
-            const endDate = document.getElementById('reportEndDate')?.value || 
-                new Date().toISOString().split('T')[0];
-                
-            const response = await fetch(`/api/reports/sales?start_date=${startDate}&end_date=${endDate}`, {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.renderSalesReport(result.report);
-                }
-            }
-        } catch (error) {
-            console.error('Rapor yükleme hatası:', error);
-        }
-    }
-
-    renderSalesReport(report) {
-        const container = document.getElementById('salesReport');
-        if (!container) return;
-        
-        container.innerHTML = `
-            <div class="report-summary">
-                <div class="report-card">
-                    <h4><i class="fas fa-shopping-cart"></i> Toplam Satış</h4>
-                    <div class="amount">${(report.total_sales || 0).toFixed(2)} TL</div>
-                </div>
-                <div class="report-card">
-                    <h4><i class="fas fa-receipt"></i> Toplam İşlem</h4>
-                    <div class="amount">${report.total_transactions || 0}</div>
-                </div>
-                <div class="report-card">
-                    <h4><i class="fas fa-money-bill-wave"></i> Nakit Satış</h4>
-                    <div class="amount">${(report.cash_sales || 0).toFixed(2)} TL</div>
-                </div>
-                <div class="report-card">
-                    <h4><i class="fas fa-credit-card"></i> Kartlı Satış</h4>
-                    <div class="amount">${(report.card_sales || 0).toFixed(2)} TL</div>
-                </div>
-            </div>
-            <div class="report-details">
-                <h4>Satış Detayları</h4>
-                ${this.renderSalesDetails(report.details || [])}
-            </div>
+                </td>
+            </tr>
         `;
-    }
+    });
+    
+    tableBody.innerHTML = tableHTML;
+}
 
-    renderSalesDetails(details) {
-        if (details.length === 0) {
-            return '<p class="empty-state">Seçilen tarih aralığında satış bulunamadı</p>';
-        }
-        
-        return `
-            <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Tarih</th>
-                            <th>Fiş No</th>
-                            <th>Toplam</th>
-                            <th>Ödeme</th>
-                            <th>Personel</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${details.map(sale => `
-                            <tr>
-                                <td>${new Date(sale.sale_date).toLocaleDateString('tr-TR')}</td>
-                                <td>${sale.id}</td>
-                                <td>${parseFloat(sale.total_amount).toFixed(2)} TL</td>
-                                <td>${sale.payment_method === 'nakit' ? 'Nakit' : 'Kredi Kartı'}</td>
-                                <td>${sale.user_name}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
-    }
-
-    // ADMIN FONKSİYONLARI
-    async loadAdminData() {
-        await this.loadUsers();
-        await this.loadSystemStats();
-    }
-
-    async loadUsers() {
-        try {
-            const response = await fetch('/api/admin/users', {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.renderUsers(result.users);
-                }
-            }
-        } catch (error) {
-            console.error('Kullanıcılar yükleme hatası:', error);
-        }
-    }
-
-    renderUsers(users) {
-        const container = document.getElementById('usersList');
-        if (!container) return;
-        
-        if (users.length === 0) {
-            container.innerHTML = '<div class="empty-state">Kullanıcı bulunamadı</div>';
-            return;
-        }
-
-        container.innerHTML = users.map(user => `
-            <div class="user-card">
-                <div class="user-info">
-                    <h4>${user.full_name}</h4>
-                    <div class="user-details">
-                        <span class="username">@${user.username}</span>
-                        <span class="role ${user.role}">${this.getRoleText(user.role)}</span>
-                    </div>
-                </div>
-                <div class="user-stats">
-                    <small>Son Giriş: ${user.last_login ? new Date(user.last_login).toLocaleDateString('tr-TR') : 'Hiç'}</small>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    async loadSystemStats() {
-        try {
-            const response = await fetch('/api/admin/system-stats', {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.renderSystemStats(result.stats);
-                }
-            }
-        } catch (error) {
-            console.error('Sistem istatistikleri yükleme hatası:', error);
-        }
-    }
-
-    renderSystemStats(stats) {
-        const totalUsers = document.getElementById('totalUsers');
-        const totalSales = document.getElementById('totalSales');
-        const totalRevenue = document.getElementById('totalRevenue');
-        
-        if (totalUsers) totalUsers.textContent = stats.total_users || 0;
-        if (totalSales) totalSales.textContent = stats.total_sales || 0;
-        if (totalRevenue) totalRevenue.textContent = (stats.total_revenue || 0).toFixed(2) + ' TL';
-    }
-
-    openAddUserModal() {
-        this.openModal('addUserModal');
-    }
-
-    async createNewUser() {
-        const username = document.getElementById('newUsername')?.value.trim();
-        const fullName = document.getElementById('newFullName')?.value.trim();
-        const password = document.getElementById('newPassword')?.value;
-        const role = document.getElementById('newUserRole')?.value;
-
-        if (!username || !fullName || !password) {
-            this.showStatus('Lütfen tüm alanları doldurun', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/admin/users', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                },
-                body: JSON.stringify({
-                    username: username,
-                    full_name: fullName,
-                    password: password,
-                    role: role
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Kullanıcı oluşturulamadı');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus('Kullanıcı başarıyla oluşturuldu', 'success');
-                this.closeModal('addUserModal');
-                await this.loadUsers();
-            } else {
-                this.showStatus('Kullanıcı oluşturulurken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Kullanıcı oluşturma hatası:', error);
-            this.showStatus('Kullanıcı oluşturulurken hata: ' + error.message, 'error');
-        }
-    }
-
-    async loadAuditLogs() {
-        try {
-            const response = await fetch('/api/admin/audit-logs', {
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.status === 'success') {
-                    this.renderAuditLogs(result.logs);
-                }
-            }
-        } catch (error) {
-            console.error('Denetim kayıtları yükleme hatası:', error);
-        }
-    }
-
-    renderAuditLogs(logs) {
-        const container = document.getElementById('auditLogs');
-        if (!container) return;
-        
-        if (logs.length === 0) {
-            container.innerHTML = '<div class="empty-state">Denetim kaydı bulunamadı</div>';
-            return;
-        }
-
-        container.innerHTML = logs.map(log => `
-            <div class="audit-log">
-                <div class="log-info">
-                    <strong>${log.user_name}</strong>
-                    <p>${log.action}</p>
-                    <small>${new Date(log.created_at).toLocaleString('tr-TR')}</small>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    async createBackup() {
-        try {
-            const response = await fetch('/api/admin/backup', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.currentUser.id}`
-                }
-            });
-
-            if (!response.ok) {
-                throw new Error('Yedek oluşturulamadı');
-            }
-
-            const result = await response.json();
-            
-            if (result.status === 'success') {
-                this.showStatus('Yedekleme başarıyla oluşturuldu', 'success');
-            } else {
-                this.showStatus('Yedekleme oluşturulurken hata: ' + result.message, 'error');
-            }
-        } catch (error) {
-            console.error('Yedekleme hatası:', error);
-            this.showStatus('Yedekleme oluşturulurken hata: ' + error.message, 'error');
-        }
-    }
-
-    loadBackupInfo() {
-        const container = document.getElementById('backupInfo');
-        if (!container) return;
-        
-        container.innerHTML = `
-            <div class="backup-card">
-                <h4><i class="fas fa-database"></i> Veritabanı Yedekleme</h4>
-                <p>Son yedekleme: ${new Date().toLocaleDateString('tr-TR')}</p>
-                <button class="btn-primary" id="createBackupBtn">
-                    <i class="fas fa-save"></i> Yedek Oluştur
-                </button>
-            </div>
-        `;
-    }
-
-    // YARDIMCI FONKSİYONLAR
-    showStatus(message, type = 'info') {
-        const statusEl = document.getElementById('statusMessage');
-        if (!statusEl) return;
-        
-        statusEl.textContent = message;
-        statusEl.className = `status-message ${type}`;
-        statusEl.style.display = 'block';
-        
-        setTimeout(() => {
-            statusEl.style.display = 'none';
-        }, 4000);
+// Stok durumu belirle
+function getStockStatus(product) {
+    if (product.stock === 0) {
+        return { class: 'danger', text: 'Stokta Yok' };
+    } else if (product.stock <= product.minStock) {
+        return { class: 'warning', text: 'Az Stok' };
+    } else {
+        return { class: 'success', text: 'Stokta Var' };
     }
 }
 
-// UYGULAMAYI BAŞLAT
-document.addEventListener('DOMContentLoaded', function() {
-    console.log("🎯 TEKEL POS sistemi yükleniyor...");
-    window.pos = new TekelPOS();
+// Rol metnini getir
+function getRoleText(role) {
+    const roles = {
+        'admin': 'Yönetici',
+        'user': 'Personel',
+        'cashier': 'Kasiyer'
+    };
+    return roles[role] || 'Kullanıcı';
+}
+
+// Status mesajı göster
+function showStatus(message, type = 'info') {
+    const statusElement = document.getElementById('statusMessage');
+    statusElement.textContent = message;
+    statusElement.className = `status-message ${type}`;
+    statusElement.style.display = 'block';
+    
+    setTimeout(() => {
+        statusElement.style.display = 'none';
+    }, 3000);
+}
+
+// Kasa açma modal'ını aç
+function openCashRegisterModal() {
+    if (cashRegister.isOpen) {
+        showStatus('Kasa zaten açık!', 'warning');
+        return;
+    }
+    openModal('cashOpenModal');
+    document.getElementById('openingBalanceInput').focus();
+}
+
+// Kasa aç
+function openCash() {
+    const openingBalance = parseFloat(document.getElementById('openingBalanceInput').value) || 0;
+    
+    cashRegister = {
+        isOpen: true,
+        openingBalance: openingBalance,
+        currentBalance: openingBalance,
+        cashSales: 0,
+        cardSales: 0
+    };
+    
+    closeModal('cashOpenModal');
+    updateCashDisplay();
+    showStatus('Kasa açıldı!', 'success');
+    saveToLocalStorage();
+}
+
+// Kasa kapatma modal'ını aç
+function closeCashRegisterModal() {
+    if (!cashRegister.isOpen) {
+        showStatus('Kasa zaten kapalı!', 'warning');
+        return;
+    }
+    
+    document.getElementById('modalOpeningBalance').textContent = cashRegister.openingBalance.toFixed(2) + ' TL';
+    document.getElementById('modalCashSales').textContent = cashRegister.cashSales.toFixed(2) + ' TL';
+    document.getElementById('modalExpectedCash').textContent = (cashRegister.openingBalance + cashRegister.cashSales).toFixed(2) + ' TL';
+    
+    openModal('cashCloseModal');
+    document.getElementById('closingBalanceInput').focus();
+}
+
+// Kasa kapat
+function closeCash() {
+    const closingBalance = parseFloat(document.getElementById('closingBalanceInput').value) || 0;
+    const expectedCash = cashRegister.openingBalance + cashRegister.cashSales;
+    const difference = closingBalance - expectedCash;
+    
+    cashRegister.isOpen = false;
+    
+    closeModal('cashCloseModal');
+    updateCashDisplay();
+    
+    if (difference !== 0) {
+        showStatus(`Kasa kapatıldı! Fark: ${difference.toFixed(2)} TL`, difference > 0 ? 'success' : 'warning');
+    } else {
+        showStatus('Kasa kapatıldı!', 'success');
+    }
+    
+    saveToLocalStorage();
+}
+
+// Kasa farkını hesapla
+function calculateCashDifference() {
+    const closingBalance = parseFloat(document.getElementById('closingBalanceInput').value) || 0;
+    const expectedCash = cashRegister.openingBalance + cashRegister.cashSales;
+    const difference = closingBalance - expectedCash;
+    
+    const differenceElement = document.getElementById('differenceAmount');
+    differenceElement.textContent = difference.toFixed(2) + ' TL';
+    differenceElement.className = difference === 0 ? 'success' : difference > 0 ? 'warning' : 'danger';
+}
+
+// Kasa görünümünü güncelle
+function updateCashDisplay() {
+    const cashStatusBadge = document.getElementById('cashStatusBadge');
+    const currentCashAmount = document.getElementById('currentCashAmount');
+    const cashStatusIcon = document.getElementById('cashStatusIcon');
+    const cashStatusText = document.getElementById('cashStatusText');
+    const openCashBtn = document.getElementById('openCashBtn');
+    const closeCashBtn = document.getElementById('closeCashBtn');
+    
+    if (cashRegister.isOpen) {
+        cashStatusBadge.textContent = 'Açık';
+        cashStatusBadge.className = 'status-badge success';
+        currentCashAmount.textContent = cashRegister.currentBalance.toFixed(2) + ' TL';
+        cashStatusIcon.className = 'fas fa-lock-open';
+        cashStatusText.textContent = 'Açık';
+        openCashBtn.style.display = 'none';
+        closeCashBtn.style.display = 'block';
+    } else {
+        cashStatusBadge.textContent = 'Kapalı';
+        cashStatusBadge.className = 'status-badge danger';
+        currentCashAmount.textContent = '0.00 TL';
+        cashStatusIcon.className = 'fas fa-lock';
+        cashStatusText.textContent = 'Kapalı';
+        openCashBtn.style.display = 'block';
+        closeCashBtn.style.display = 'none';
+    }
+}
+
+// Kasa durumunu yükle
+function loadCashStatus() {
+    updateCashDisplay();
+    
+    // Kasa detaylarını güncelle
+    document.getElementById('openingBalance').textContent = cashRegister.openingBalance.toFixed(2) + ' TL';
+    document.getElementById('totalSalesAmount').textContent = (cashRegister.cashSales + cashRegister.cardSales).toFixed(2) + ' TL';
+    document.getElementById('cashSalesAmount').textContent = cashRegister.cashSales.toFixed(2) + ' TL';
+    document.getElementById('cardSalesAmount').textContent = cashRegister.cardSales.toFixed(2) + ' TL';
+    document.getElementById('expectedCash').textContent = (cashRegister.openingBalance + cashRegister.cashSales).toFixed(2) + ' TL';
+}
+
+// Stok yönetimini yükle
+function loadInventory() {
+    const tableBody = document.getElementById('inventoryTableBody');
+    const statTotalProducts = document.getElementById('statTotalProducts');
+    const statInStock = document.getElementById('statInStock');
+    const statLowStock = document.getElementById('statLowStock');
+    const statOutOfStock = document.getElementById('statOutOfStock');
+    
+    // İstatistikleri güncelle
+    statTotalProducts.textContent = products.length;
+    statInStock.textContent = products.filter(p => p.stock > p.minStock).length;
+    statLowStock.textContent = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+    statOutOfStock.textContent = products.filter(p => p.stock === 0).length;
+    
+    if (products.length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="7" class="empty-state">
+                    <i class="fas fa-warehouse"></i>
+                    <p>Stok bilgisi bulunamadı</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    let tableHTML = '';
+    products.forEach(product => {
+        const status = getStockStatus(product);
+        tableHTML += `
+            <tr>
+                <td>${product.barcode}</td>
+                <td>${product.name}</td>
+                <td>${product.price.toFixed(2)} TL</td>
+                <td>${product.stock}</td>
+                <td>${product.minStock}</td>
+                <td><span class="status-badge ${status.class}">${status.text}</span></td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn-small btn-success" onclick="quickAddStock('${product.barcode}')">
+                            <i class="fas fa-plus"></i> Stok Ekle
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    tableBody.innerHTML = tableHTML;
+}
+
+// Hızlı stok ekle
+function quickAddStock(barcode) {
+    const quantity = prompt('Eklenecek miktarı girin:', '1');
+    if (quantity && !isNaN(quantity) && parseInt(quantity) > 0) {
+        addStock(barcode, parseInt(quantity));
+    }
+}
+
+// Stok ekle
+function addStock(barcode, quantity = 1) {
+    const product = products.find(p => p.barcode === barcode);
+    if (product) {
+        product.stock += quantity;
+        saveToLocalStorage();
+        loadInventory();
+        showStatus(`${product.name} stok eklendi: +${quantity}`, 'success');
+    }
+}
+
+// Yeni ürün modal'ını aç
+function openAddProductModal() {
+    // Formu temizle
+    document.getElementById('addProductForm').reset();
+    openModal('addProductModal');
+}
+
+// Yeni ürün ekle
+function addNewProduct(event) {
+    event.preventDefault();
+    
+    const newProduct = {
+        barcode: document.getElementById('newProductBarcode').value,
+        name: document.getElementById('newProductName').value,
+        price: parseFloat(document.getElementById('newProductPrice').value),
+        stock: parseInt(document.getElementById('newProductQuantity').value),
+        minStock: parseInt(document.getElementById('newProductMinStock').value),
+        kdv: parseFloat(document.getElementById('newProductKDV').value),
+        otv: parseFloat(document.getElementById('newProductOTV').value)
+    };
+    
+    // Barkod kontrolü
+    if (products.find(p => p.barcode === newProduct.barcode)) {
+        showStatus('Bu barkoda sahip ürün zaten var!', 'error');
+        return;
+    }
+    
+    products.push(newProduct);
+    saveToLocalStorage();
+    closeModal('addProductModal');
+    loadProducts();
+    loadInventory();
+    showStatus('Ürün başarıyla eklendi!', 'success');
+}
+
+// Raporları yükle
+function loadReports() {
+    // Demo rapor verileri
+    const dailyStats = document.getElementById('dailyStats');
+    dailyStats.innerHTML = `
+        <div class="daily-stat-item">
+            <span>Toplam Satış:</span>
+            <span>1,250.75 TL</span>
+        </div>
+        <div class="daily-stat-item">
+            <span>Nakit Satış:</span>
+            <span>850.50 TL</span>
+        </div>
+        <div class="daily-stat-item">
+            <span>Kartlı Satış:</span>
+            <span>400.25 TL</span>
+        </div>
+        <div class="daily-stat-item">
+            <span>Toplam İşlem:</span>
+            <span>28</span>
+        </div>
+    `;
+    
+    const topProducts = document.getElementById('topProducts');
+    topProducts.innerHTML = `
+        <div class="top-product-item">
+            <span>1. Marlboro Red</span>
+            <span>15 adet</span>
+        </div>
+        <div class="top-product-item">
+            <span>2. Marlboro Gold</span>
+            <span>12 adet</span>
+        </div>
+        <div class="top-product-item">
+            <span>3. Camel Yellow</span>
+            <span>8 adet</span>
+        </div>
+    `;
+}
+
+// Admin verilerini yükle
+function loadAdminData() {
+    document.getElementById('totalUsers').textContent = '3';
+    document.getElementById('totalSales').textContent = '156';
+    document.getElementById('totalRevenue').textContent = '18,450.75 TL';
+    
+    // Kullanıcıları yükle
+    loadUsers();
+}
+
+// Kullanıcıları yükle
+function loadUsers() {
+    const usersTableBody = document.getElementById('usersTableBody');
+    // Demo kullanıcılar
+    const users = [
+        { username: 'admin', fullName: 'Sistem Yöneticisi', role: 'admin', lastLogin: '2024-01-15 14:30' },
+        { username: 'kasiyer1', fullName: 'Ahmet Yılmaz', role: 'cashier', lastLogin: '2024-01-15 13:45' },
+        { username: 'personel1', fullName: 'Ayşe Demir', role: 'user', lastLogin: '2024-01-15 12:20' }
+    ];
+    
+    let tableHTML = '';
+    users.forEach(user => {
+        tableHTML += `
+            <tr>
+                <td>${user.username}</td>
+                <td>${user.fullName}</td>
+                <td>${getRoleText(user.role)}</td>
+                <td>${user.lastLogin}</td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn-small btn-primary">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-small btn-danger">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    usersTableBody.innerHTML = tableHTML;
+}
+
+// Yeni kullanıcı modal'ını aç
+function openAddUserModal() {
+    document.getElementById('addUserForm').reset();
+    openModal('addUserModal');
+}
+
+// Yeni kullanıcı oluştur
+function createNewUser(event) {
+    event.preventDefault();
+    
+    const password = document.getElementById('newPassword').value;
+    const passwordConfirm = document.getElementById('newPasswordConfirm').value;
+    
+    if (password !== passwordConfirm) {
+        showStatus('Şifreler eşleşmiyor!', 'error');
+        return;
+    }
+    
+    // Burada gerçek kullanıcı oluşturma işlemi yapılacak
+    showStatus('Kullanıcı başarıyla oluşturuldu!', 'success');
+    closeModal('addUserModal');
+}
+
+// Admin sekmesi aç
+function openAdminTab(tabName) {
+    // Tüm admin tab butonlarını pasif yap
+    const adminTabBtns = document.querySelectorAll('.admin-tab-btn');
+    adminTabBtns.forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Tüm admin tab içeriklerini gizle
+    const adminTabContents = document.querySelectorAll('.admin-tab-content');
+    adminTabContents.forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Aktif butonu işaretle
+    const activeBtn = document.querySelector(`[data-admin-tab="${tabName}"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
+    
+    // Aktif tab'ı göster
+    const activeTab = document.getElementById(`admin-${tabName}`);
+    if (activeTab) {
+        activeTab.classList.add('active');
+    }
+}
+
+// Sayfa kapatılırken verileri kaydet
+window.addEventListener('beforeunload', function() {
+    saveToLocalStorage();
 });
 
-// GLOBAL FONKSİYONLAR
-function closeModal(modalId) {
-    if (window.pos) {
-        window.pos.closeModal(modalId);
-    }
-}
-
-function openModal(modalId) {
-    if (window.pos) {
-        window.pos.openModal(modalId);
-    }
-}
+// Hata yönetimi
+window.addEventListener('error', function(e) {
+    console.error('Uygulama hatası:', e.error);
+    showStatus('Bir hata oluştu!', 'error');
+});
