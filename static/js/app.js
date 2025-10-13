@@ -12,38 +12,46 @@ class TekelPOS {
         this.videoStream = null;
         this.scanning = false;
         
-        // Demo veriler
-        this.demoProducts = [
-            { barcode: '8691234567890', name: 'Coca Cola 330ml', price: 25.00, quantity: 50, kdv: 18 },
-            { barcode: '8691234567891', name: 'Fanta 330ml', price: 22.00, quantity: 30, kdv: 18 },
-            { barcode: '8691234567892', name: 'Sprite 330ml', price: 22.00, quantity: 25, kdv: 18 },
-            { barcode: '8691234567893', name: 'Eti Browni', price: 15.00, quantity: 20, kdv: 8 },
-            { barcode: '8691234567894', name: 'Ülker Çikolatalı Gofret', price: 12.50, quantity: 40, kdv: 8 },
-            { barcode: '8691234567895', name: 'Lays Patates Cipsi', price: 18.00, quantity: 35, kdv: 18 },
-            { barcode: '8691234567896', name: 'Red Bull', price: 35.00, quantity: 15, kdv: 18 },
-            { barcode: '8691234567897', name: 'Sütaş Ayran 200ml', price: 8.00, quantity: 60, kdv: 8 }
-        ];
-
         this.init();
     }
 
     async init() {
         console.log("🚀 TEKEL POS sistemi başlatılıyor...");
+        this.initializeModals();
         this.setupEventListeners();
         await this.checkAuth();
     }
 
-    // MODAL FONKSİYONLARI
+    // MODAL YÖNETİMİ - TÜM MODALLAR TANIMLI
+    initializeModals() {
+        // Tüm modal elementlerini kontrol et ve hazırla
+        const modalIds = [
+            'loginModal', 'addProductModal', 'cashRegisterModal', 
+            'receiptModal', 'stockAddModal', 'addUserModal'
+        ];
+        
+        modalIds.forEach(modalId => {
+            const modal = document.getElementById(modalId);
+            if (!modal) {
+                console.warn(`Modal #${modalId} bulunamadı!`);
+            }
+        });
+    }
+
     openModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
             modal.style.display = 'flex';
             document.body.classList.add('modal-open');
+            console.log(`Modal açıldı: ${modalId}`);
+            
             // Input'a focus
             setTimeout(() => {
                 const input = modal.querySelector('input');
                 if (input) input.focus();
             }, 100);
+        } else {
+            console.error(`Modal bulunamadı: ${modalId}`);
         }
     }
 
@@ -52,45 +60,31 @@ class TekelPOS {
         if (modal) {
             modal.style.display = 'none';
             document.body.classList.remove('modal-open');
+            console.log(`Modal kapandı: ${modalId}`);
         }
     }
 
-    // EVENT LISTENER'LAR
+    // EVENT LISTENER'LAR - TÜM BUTONLAR ÇALIŞIYOR
     setupEventListeners() {
         console.log("🔗 Event listener'lar bağlanıyor...");
 
         // Login form
-        const loginForm = document.getElementById('loginForm');
-        if (loginForm) {
-            loginForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                this.login();
-            });
-        }
+        this.bindSubmit('loginForm', (e) => {
+            e.preventDefault();
+            this.login();
+        });
 
         // Barkod input - Enter tuşu
-        const barcodeInput = document.getElementById('barcodeInput');
-        if (barcodeInput) {
-            barcodeInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.addProductByBarcode();
-                }
-            });
-        }
+        this.bindKeypress('barcodeInput', (e) => {
+            if (e.key === 'Enter') this.addProductByBarcode();
+        });
 
         // Nakit miktarı değişikliği
-        const cashAmount = document.getElementById('cashAmount');
-        if (cashAmount) {
-            cashAmount.addEventListener('input', () => {
-                this.calculateChange();
-            });
-        }
+        this.bindInput('cashAmount', () => this.calculateChange());
 
         // Ödeme yöntemi değişikliği
         document.querySelectorAll('input[name="paymentMethod"]').forEach(radio => {
-            radio.addEventListener('change', () => {
-                this.toggleCashInput();
-            });
+            radio.addEventListener('change', () => this.toggleCashInput());
         });
 
         // Sekme değiştirme
@@ -98,9 +92,7 @@ class TekelPOS {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
                 const tab = item.getAttribute('data-tab');
-                if (tab) {
-                    this.openTab(tab);
-                }
+                if (tab) this.openTab(tab);
             });
         });
 
@@ -108,7 +100,7 @@ class TekelPOS {
         document.querySelectorAll('.admin-tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const tab = btn.getAttribute('data-admin-tab');
-                this.openAdminTab(tab);
+                if (tab) this.openAdminTab(tab);
             });
         });
 
@@ -116,9 +108,7 @@ class TekelPOS {
         document.querySelectorAll('.close-modal').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const modal = e.target.closest('.modal');
-                if (modal) {
-                    this.closeModal(modal.id);
-                }
+                if (modal) this.closeModal(modal.id);
             });
         });
 
@@ -129,36 +119,12 @@ class TekelPOS {
             }
         });
 
-        // Enter tuşu ile login
-        document.getElementById('password')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.login();
-            }
-        });
-
-        // Hızlı barkod input
-        const quickBarcodeInput = document.getElementById('quickBarcodeInput');
-        if (quickBarcodeInput) {
-            quickBarcodeInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.quickStockAdd();
-                }
-            });
-        }
-
-        // Manuel barkod input
-        document.getElementById('manualBarcodeInput')?.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                this.addManualBarcode();
-            }
-        });
-
-        // DOĞRUDAN BUTON BAĞLANTILARI
-        this.bindDirectButtonEvents();
+        // TÜM BUTONLARI BAĞLA
+        this.bindAllButtons();
     }
 
-    bindDirectButtonEvents() {
-        // Login butonu
+    bindAllButtons() {
+        // Login butonları
         this.bindClick('loginBtn', () => this.login());
         
         // Çıkış butonu
@@ -193,15 +159,86 @@ class TekelPOS {
 
         // Rapor butonları
         this.bindClick('filterReportsBtn', () => this.loadSalesReport());
+
+        // Stok kaydetme butonları - dinamik olarak bağlanacak
+        this.bindDynamicButtons();
+    }
+
+    bindDynamicButtons() {
+        // Dinamik olarak oluşturulan butonlar için event delegation
+        document.addEventListener('click', (e) => {
+            // Stok kaydet butonları
+            if (e.target.classList.contains('save-stock-btn')) {
+                const barcode = e.target.getAttribute('data-barcode');
+                if (barcode) this.saveStock(barcode);
+                return;
+            }
+
+            // Hızlı stok ekle butonları
+            if (e.target.classList.contains('quick-add-stock')) {
+                const barcode = e.target.getAttribute('data-barcode');
+                const quantity = parseInt(e.target.getAttribute('data-quantity') || '1');
+                if (barcode) this.quickAddStock(barcode, quantity);
+                return;
+            }
+
+            // Sepet quantity butonları
+            if (e.target.classList.contains('quantity-btn')) {
+                const action = e.target.textContent;
+                const itemElement = e.target.closest('.cart-item');
+                if (itemElement) {
+                    const barcode = itemElement.querySelector('.barcode')?.textContent;
+                    if (barcode) {
+                        if (action === '-') this.updateCartQuantity(barcode, -1);
+                        else if (action === '+') this.updateCartQuantity(barcode, 1);
+                    }
+                }
+                return;
+            }
+
+            // Sepetten kaldır butonları
+            if (e.target.classList.contains('remove-btn') || e.target.closest('.remove-btn')) {
+                const itemElement = e.target.closest('.cart-item');
+                if (itemElement) {
+                    const barcode = itemElement.querySelector('.barcode')?.textContent;
+                    if (barcode) this.removeFromCart(barcode);
+                }
+                return;
+            }
+        });
     }
 
     bindClick(id, handler) {
         const element = document.getElementById(id);
         if (element) {
             element.addEventListener('click', handler);
+        } else {
+            console.warn(`Buton bulunamadı: #${id}`);
         }
     }
 
+    bindSubmit(id, handler) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('submit', handler);
+        }
+    }
+
+    bindKeypress(id, handler) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('keypress', handler);
+        }
+    }
+
+    bindInput(id, handler) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('input', handler);
+        }
+    }
+
+    // AUTH YÖNETİMİ
     async checkAuth() {
         const userData = localStorage.getItem('userData');
         if (userData) {
@@ -210,6 +247,7 @@ class TekelPOS {
                 this.showApp();
                 await this.loadInitialData();
             } catch (error) {
+                console.error("Kullanıcı verisi okunamadı:", error);
                 this.showLogin();
             }
         } else {
@@ -226,11 +264,9 @@ class TekelPOS {
         
         this.closeAllModalsExcept('loginModal');
         
-        // Inputları temizle ve focusla
         setTimeout(() => {
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-            document.getElementById('username').focus();
+            const usernameInput = document.getElementById('username');
+            if (usernameInput) usernameInput.focus();
         }, 100);
     }
 
@@ -241,9 +277,7 @@ class TekelPOS {
         if (loginModal) loginModal.style.display = 'none';
         if (appContainer) appContainer.style.display = 'flex';
         
-        // Kullanıcı bilgilerini güncelle
         this.updateUserInfo();
-        
         this.openTab('dashboard');
     }
 
@@ -251,11 +285,15 @@ class TekelPOS {
         const currentUserEl = document.getElementById('currentUser');
         const currentRoleEl = document.getElementById('currentRole');
         
-        if (currentUserEl) currentUserEl.textContent = this.currentUser.full_name;
-        if (currentRoleEl) currentRoleEl.textContent = this.getRoleText(this.currentUser.role);
+        if (currentUserEl && this.currentUser) {
+            currentUserEl.textContent = this.currentUser.full_name;
+        }
+        if (currentRoleEl && this.currentUser) {
+            currentRoleEl.textContent = this.getRoleText(this.currentUser.role);
+        }
         
         // Admin yetkilerini kontrol et
-        if (this.currentUser.role !== 'admin') {
+        if (this.currentUser && this.currentUser.role !== 'admin') {
             document.querySelectorAll('.admin-only').forEach(el => {
                 el.style.display = 'none';
             });
@@ -286,8 +324,8 @@ class TekelPOS {
     }
 
     async login() {
-        const username = document.getElementById('username').value;
-        const password = document.getElementById('password').value;
+        const username = document.getElementById('username')?.value;
+        const password = document.getElementById('password')?.value;
 
         if (!username || !password) {
             this.showStatus('Kullanıcı adı ve şifre gerekli', 'error');
@@ -295,42 +333,32 @@ class TekelPOS {
         }
 
         try {
-            let user = null;
-            
-            if (username === 'admin' && password === 'admin123') {
-                user = {
-                    id: 1,
-                    username: 'admin',
-                    full_name: 'Sistem Yöneticisi',
-                    role: 'admin'
-                };
-            } else if (username === 'kasiyer' && password === 'kasiyer123') {
-                user = {
-                    id: 2,
-                    username: 'kasiyer',
-                    full_name: 'Ahmet Yılmaz',
-                    role: 'cashier'
-                };
-            } else if (username === 'personel' && password === 'personel123') {
-                user = {
-                    id: 3,
-                    username: 'personel',
-                    full_name: 'Mehmet Demir',
-                    role: 'user'
-                };
-            } else {
-                this.showStatus('Geçersiz kullanıcı adı veya şifre', 'error');
-                return;
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (!response.ok) {
+                throw new Error('Sunucu hatası');
             }
 
-            this.currentUser = user;
-            localStorage.setItem('userData', JSON.stringify(user));
-            this.showApp();
-            await this.loadInitialData();
-            this.showStatus(`Hoş geldiniz ${user.full_name}`, 'success');
+            const result = await response.json();
             
+            if (result.status === 'success') {
+                this.currentUser = result.user;
+                localStorage.setItem('userData', JSON.stringify(result.user));
+                this.showApp();
+                await this.loadInitialData();
+                this.showStatus('Başarıyla giriş yapıldı', 'success');
+            } else {
+                this.showStatus(result.message || 'Giriş başarısız', 'error');
+            }
         } catch (error) {
-            this.showStatus('Giriş hatası: ' + error.message, 'error');
+            console.error('Login hatası:', error);
+            this.showStatus('Sunucu hatası: ' + error.message, 'error');
         }
     }
 
@@ -393,7 +421,7 @@ class TekelPOS {
                 this.loadCashManagement();
                 break;
             case 'admin':
-                if (this.currentUser.role === 'admin') {
+                if (this.currentUser?.role === 'admin') {
                     this.loadAdminData();
                 }
                 break;
@@ -444,15 +472,36 @@ class TekelPOS {
         }
     }
 
-    // ÜRÜN YÖNETİMİ
+    // ÜRÜN YÖNETİMİ - API BAĞLANTILI
     async loadProducts() {
         try {
-            // Demo ürünleri kullan
-            this.products = [...this.demoProducts];
+            const token = this.currentUser?.id;
+            const response = await fetch('/api/products', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Ürünler yüklenemedi');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.products = result.products;
+                this.renderProducts();
+                this.renderProductsTable();
+            } else {
+                this.showStatus('Ürünler yüklenirken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Ürün yükleme hatası:', error);
+            this.showStatus('Ürünler yüklenirken hata: ' + error.message, 'error');
+            // Hata durumunda boş ürün listesi
+            this.products = [];
             this.renderProducts();
             this.renderProductsTable();
-        } catch (error) {
-            this.showStatus('Ürünler yüklenirken hata: ' + error.message, 'error');
         }
     }
 
@@ -481,11 +530,20 @@ class TekelPOS {
                     </div>
                     <div class="barcode">${product.barcode}</div>
                 </div>
-                <button class="btn-primary btn-small" onclick="window.pos.addToCart('${product.barcode}')">
+                <button class="btn-primary btn-small add-to-cart-btn" data-barcode="${product.barcode}">
                     <i class="fas fa-cart-plus"></i> Ekle
                 </button>
             </div>
         `).join('');
+
+        // Sepete ekle butonlarını bağla
+        grid.querySelectorAll('.add-to-cart-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const barcode = e.target.getAttribute('data-barcode') || 
+                               e.target.closest('.add-to-cart-btn').getAttribute('data-barcode');
+                if (barcode) this.addToCart(barcode);
+            });
+        });
     }
 
     renderProductsTable() {
@@ -504,43 +562,48 @@ class TekelPOS {
             return;
         }
 
-        tbody.innerHTML = this.products.map(product => `
-            <tr>
-                <td>${product.barcode}</td>
-                <td><strong>${product.name}</strong></td>
-                <td>${product.price} TL</td>
-                <td>
-                    <input type="number" 
-                           class="stock-input" 
-                           value="${product.quantity}" 
-                           min="0"
-                           data-barcode="${product.barcode}"
-                           style="width: 80px; padding: 4px;">
-                </td>
-                <td>%${product.kdv}</td>
-                <td>
-                    <span class="status-badge ${product.quantity === 0 ? 'danger' : product.quantity <= 5 ? 'warning' : 'success'}">
-                        ${product.quantity === 0 ? 'Stokta Yok' : product.quantity <= 5 ? 'Az Stok' : 'Stokta Var'}
-                    </span>
-                </td>
-                <td>
-                    <button class="btn-primary btn-small" onclick="window.pos.saveStock('${product.barcode}')">
-                        Kaydet
-                    </button>
-                </td>
-                <td>
-                    <button class="btn-primary btn-small" onclick="window.pos.quickAddStock('${product.barcode}', 1)">
-                        +1
-                    </button>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = this.products.map(product => {
+            const statusClass = product.quantity === 0 ? 'danger' : 
+                              product.quantity <= 5 ? 'warning' : 'success';
+            const statusText = product.quantity === 0 ? 'Stokta Yok' : 
+                             product.quantity <= 5 ? 'Az Stok' : 'Stokta Var';
+            
+            return `
+                <tr>
+                    <td>${product.barcode}</td>
+                    <td><strong>${product.name}</strong></td>
+                    <td>${product.price} TL</td>
+                    <td>
+                        <input type="number" 
+                               class="stock-input" 
+                               value="${product.quantity}" 
+                               min="0"
+                               data-barcode="${product.barcode}"
+                               style="width: 80px; padding: 4px;">
+                    </td>
+                    <td>%${product.kdv || 18}</td>
+                    <td>
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </td>
+                    <td>
+                        <button class="btn-primary btn-small save-stock-btn" data-barcode="${product.barcode}">
+                            Kaydet
+                        </button>
+                    </td>
+                    <td>
+                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="1">
+                            +1
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
     }
 
     // SEPET İŞLEMLERİ
     async addProductByBarcode() {
         const barcodeInput = document.getElementById('barcodeInput');
-        const barcode = barcodeInput.value.trim();
+        const barcode = barcodeInput?.value.trim();
         
         if (!barcode) {
             this.showStatus('Lütfen barkod girin', 'warning');
@@ -550,13 +613,15 @@ class TekelPOS {
         const product = this.products.find(p => p.barcode === barcode);
         if (!product) {
             this.showStatus('Ürün bulunamadı! Yeni ürün eklemek için "Ürünler" sekmesine gidin.', 'error');
-            barcodeInput.value = '';
+            if (barcodeInput) barcodeInput.value = '';
             return;
         }
 
         this.addToCart(product.barcode);
-        barcodeInput.value = '';
-        barcodeInput.focus();
+        if (barcodeInput) {
+            barcodeInput.value = '';
+            barcodeInput.focus();
+        }
     }
 
     addToCart(barcode) {
@@ -659,11 +724,11 @@ class TekelPOS {
                     </div>
                     <div class="cart-item-controls">
                         <div class="quantity-controls">
-                            <button class="quantity-btn" onclick="window.pos.updateCartQuantity('${item.barcode}', -1)">-</button>
+                            <button class="quantity-btn">-</button>
                             <span class="quantity">${item.quantity}</span>
-                            <button class="quantity-btn" onclick="window.pos.updateCartQuantity('${item.barcode}', 1)">+</button>
+                            <button class="quantity-btn">+</button>
                         </div>
-                        <button class="remove-btn" onclick="window.pos.removeFromCart('${item.barcode}')">
+                        <button class="remove-btn">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -726,28 +791,50 @@ class TekelPOS {
             return;
         }
 
-        // Stokları güncelle
-        for (const item of this.cart) {
-            const product = this.products.find(p => p.barcode === item.barcode);
-            if (product) {
-                product.quantity -= item.quantity;
-                if (product.quantity < 0) product.quantity = 0;
-            }
-        }
+        const saleData = {
+            items: this.cart,
+            total: total,
+            payment_method: paymentMethod,
+            cash_amount: paymentMethod === 'nakit' ? cashAmount : 0,
+            credit_card_amount: paymentMethod === 'kredi' ? total : 0,
+            change_amount: paymentMethod === 'nakit' ? (cashAmount - total) : 0,
+            user_id: this.currentUser.id
+        };
 
-        const saleId = 'F' + Date.now().toString().slice(-6);
-        this.showStatus(`Satış başarıyla tamamlandı! Fiş No: ${saleId} - Toplam: ${total.toFixed(2)} TL`, 'success');
-        
-        this.cart = [];
-        this.renderCart();
-        this.renderProducts();
-        this.renderProductsTable();
-        
-        // Barkod input'una focusla
-        const barcodeInput = document.getElementById('barcodeInput');
-        if (barcodeInput) {
-            barcodeInput.value = '';
-            barcodeInput.focus();
+        try {
+            const response = await fetch('/api/sale', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify(saleData)
+            });
+
+            if (!response.ok) {
+                throw new Error('Satış kaydedilemedi');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus(`Satış başarıyla tamamlandı! Fiş No: ${result.sale_id}`, 'success');
+                this.cart = [];
+                this.renderCart();
+                await this.loadProducts();
+                await this.loadDashboardData();
+                
+                const barcodeInput = document.getElementById('barcodeInput');
+                if (barcodeInput) {
+                    barcodeInput.value = '';
+                    barcodeInput.focus();
+                }
+            } else {
+                this.showStatus('Satış sırasında hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Satış hatası:', error);
+            this.showStatus('Satış sırasında hata: ' + error.message, 'error');
         }
     }
 
@@ -766,75 +853,123 @@ class TekelPOS {
             return;
         }
 
-        const product = this.products.find(p => p.barcode === barcode);
-        if (product) {
-            product.quantity = newQuantity;
-            this.showStatus(`${product.name} stok güncellendi: ${newQuantity}`, 'success');
-            this.renderProducts();
-            this.renderProductsTable();
+        try {
+            const response = await fetch('/api/stock/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    barcode: barcode,
+                    quantity: newQuantity
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Stok güncellenemedi');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Stok güncellendi', 'success');
+                await this.loadProducts();
+            } else {
+                this.showStatus('Stok güncellenirken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Stok güncelleme hatası:', error);
+            this.showStatus('Stok güncellenirken hata: ' + error.message, 'error');
         }
     }
 
-    quickAddStock(barcode, quantity) {
-        const product = this.products.find(p => p.barcode === barcode);
-        if (product) {
-            product.quantity += quantity;
-            this.showStatus(`${product.name} stok +${quantity} eklendi`, 'success');
-            this.renderProducts();
-            this.renderProductsTable();
-            
-            // Input değerini güncelle
-            const input = document.querySelector(`.stock-input[data-barcode="${barcode}"]`);
-            if (input) {
-                input.value = product.quantity;
+    async quickAddStock(barcode, quantity) {
+        try {
+            const response = await fetch('/api/stock/add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    barcode: barcode,
+                    quantity: quantity
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Stok eklenemedi');
             }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus(`${quantity} adet stok eklendi`, 'success');
+                await this.loadProducts();
+            } else {
+                this.showStatus('Stok eklenirken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Stok ekleme hatası:', error);
+            this.showStatus('Stok eklenirken hata: ' + error.message, 'error');
         }
     }
 
     // YENİ ÜRÜN EKLEME
     openAddProductModal() {
         // Formu temizle
-        document.getElementById('newProductBarcode').value = '';
-        document.getElementById('newProductName').value = '';
-        document.getElementById('newProductPrice').value = '';
-        document.getElementById('newProductQuantity').value = '1';
-        document.getElementById('newProductKDV').value = '18';
+        const form = document.getElementById('addProductForm');
+        if (form) form.reset();
         
         this.openModal('addProductModal');
     }
 
     async addNewProduct() {
-        const barcode = document.getElementById('newProductBarcode').value.trim();
-        const name = document.getElementById('newProductName').value.trim();
-        const price = parseFloat(document.getElementById('newProductPrice').value) || 0;
-        const quantity = parseInt(document.getElementById('newProductQuantity').value) || 1;
-        const kdv = parseFloat(document.getElementById('newProductKDV').value) || 18;
+        const barcode = document.getElementById('newProductBarcode')?.value.trim();
+        const name = document.getElementById('newProductName')?.value.trim();
+        const price = parseFloat(document.getElementById('newProductPrice')?.value) || 0;
+        const quantity = parseInt(document.getElementById('newProductQuantity')?.value) || 1;
+        const kdv = parseFloat(document.getElementById('newProductKDV')?.value) || 18;
 
         if (!barcode || !name || price <= 0) {
             this.showStatus('Lütfen zorunlu alanları doldurun (Barkod, Ürün Adı, Fiyat)', 'error');
             return;
         }
 
-        // Ürün zaten var mı kontrol et
-        const existingProduct = this.products.find(p => p.barcode === barcode);
-        if (existingProduct) {
-            this.showStatus('Bu barkod ile kayıtlı ürün zaten var', 'error');
-            return;
+        try {
+            const response = await fetch('/api/products', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    barcode: barcode,
+                    name: name,
+                    price: price,
+                    quantity: quantity,
+                    kdv: kdv
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Ürün eklenemedi');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Ürün başarıyla eklendi', 'success');
+                this.closeModal('addProductModal');
+                await this.loadProducts();
+            } else {
+                this.showStatus('Ürün eklenirken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Ürün ekleme hatası:', error);
+            this.showStatus('Ürün eklenirken hata: ' + error.message, 'error');
         }
-
-        // Yeni ürün ekle
-        this.products.push({
-            barcode: barcode,
-            name: name,
-            price: price,
-            quantity: quantity,
-            kdv: kdv
-        });
-
-        this.showStatus('Ürün başarıyla eklendi', 'success');
-        this.closeModal('addProductModal');
-        this.renderProducts();
-        this.renderProductsTable();
     }
 
     // KASA YÖNETİMİ
@@ -854,29 +989,92 @@ class TekelPOS {
             return;
         }
         
-        this.showStatus(`Kasa açıldı: ${amount.toFixed(2)} TL`, 'success');
-        this.closeModal('cashRegisterModal');
-        
-        // Kasa durumunu güncelle
-        this.updateCashStatus(true, amount);
+        try {
+            const response = await fetch('/api/cash/open', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    initial_amount: amount
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Kasa açılamadı');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus(`Kasa açıldı: ${amount.toFixed(2)} TL`, 'success');
+                this.closeModal('cashRegisterModal');
+                await this.loadCashManagement();
+            } else {
+                this.showStatus('Kasa açılırken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Kasa açma hatası:', error);
+            this.showStatus('Kasa açılırken hata: ' + error.message, 'error');
+        }
     }
 
     async closeCash() {
-        const amount = parseFloat(document.getElementById('closeCashAmount')?.value) || 0;
-        this.showStatus(`Kasa kapandı: ${amount.toFixed(2)} TL`, 'success');
-        this.closeModal('cashRegisterModal');
-        
-        // Kasa durumunu güncelle
-        this.updateCashStatus(false, 0);
+        try {
+            const response = await fetch('/api/cash/close', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Kasa kapatılamadı');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Kasa kapandı', 'success');
+                this.closeModal('cashRegisterModal');
+                await this.loadCashManagement();
+            } else {
+                this.showStatus('Kasa kapatılırken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Kasa kapatma hatası:', error);
+            this.showStatus('Kasa kapatılırken hata: ' + error.message, 'error');
+        }
     }
 
-    updateCashStatus(isOpen, amount) {
+    async loadCashManagement() {
+        try {
+            const response = await fetch('/api/cash/status', {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.updateCashUI(result.cash_status);
+                }
+            }
+        } catch (error) {
+            console.error('Kasa durumu yükleme hatası:', error);
+        }
+    }
+
+    updateCashUI(cashStatus) {
         const openBtn = document.getElementById('openCashBtn');
         const closeBtn = document.getElementById('closeCashBtn');
         const statusBadge = document.getElementById('cashStatusBadge');
         const currentAmount = document.getElementById('currentCashAmount');
 
-        if (isOpen) {
+        if (cashStatus.is_open) {
             if (statusBadge) {
                 statusBadge.className = 'status-badge success';
                 statusBadge.textContent = 'Açık';
@@ -884,7 +1082,7 @@ class TekelPOS {
             if (openBtn) openBtn.style.display = 'none';
             if (closeBtn) closeBtn.style.display = 'inline-block';
             if (currentAmount) {
-                currentAmount.textContent = amount.toFixed(2) + ' TL';
+                currentAmount.textContent = cashStatus.current_amount + ' TL';
             }
         } else {
             if (statusBadge) {
@@ -901,53 +1099,39 @@ class TekelPOS {
 
     // DASHBOARD
     async loadDashboardData() {
+        try {
+            const response = await fetch('/api/dashboard', {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.updateDashboard(result.data);
+                }
+            }
+        } catch (error) {
+            console.error('Dashboard yükleme hatası:', error);
+        }
+    }
+
+    updateDashboard(data) {
         const todaySales = document.getElementById('todaySales');
         const totalProducts = document.getElementById('totalProducts');
         const lowStockCount = document.getElementById('lowStockCount');
         const outOfStockCount = document.getElementById('outOfStockCount');
         
-        if (todaySales) todaySales.textContent = '0.00 TL';
-        if (totalProducts) totalProducts.textContent = this.products.length;
-        
-        const lowStockProducts = this.products.filter(p => p.quantity > 0 && p.quantity <= 5);
-        const outOfStockProducts = this.products.filter(p => p.quantity === 0);
-        
-        if (lowStockCount) lowStockCount.textContent = lowStockProducts.length;
-        if (outOfStockCount) outOfStockCount.textContent = outOfStockProducts.length;
-        
-        // Stok uyarılarını göster
-        this.renderStockAlerts(lowStockProducts, outOfStockProducts);
-    }
-
-    renderStockAlerts(lowStock, outOfStock) {
-        const alertsContainer = document.getElementById('stockAlerts');
-        if (!alertsContainer) return;
-
-        const allAlerts = [...outOfStock, ...lowStock];
-        
-        if (allAlerts.length === 0) {
-            alertsContainer.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-check-circle"></i>
-                    <p>Tüm stoklar yeterli</p>
-                </div>
-            `;
-            return;
-        }
-
-        alertsContainer.innerHTML = allAlerts.map(product => `
-            <div class="alert-item ${product.quantity === 0 ? 'danger' : 'warning'}">
-                <i class="fas fa-${product.quantity === 0 ? 'times-circle' : 'exclamation-triangle'}"></i>
-                <div class="alert-info">
-                    <strong>${product.name}</strong>
-                    <span>Stok: ${product.quantity} ${product.quantity === 0 ? '(Stokta Yok)' : '(Az Stok)'}</span>
-                </div>
-            </div>
-        `).join('');
+        if (todaySales) todaySales.textContent = (data.daily_sales || 0).toFixed(2) + ' TL';
+        if (totalProducts) totalProducts.textContent = data.total_products || 0;
+        if (lowStockCount) lowStockCount.textContent = data.low_stock_count || 0;
+        if (outOfStockCount) outOfStockCount.textContent = data.out_of_stock_count || 0;
     }
 
     // ENVANTER
     async loadInventory() {
+        await this.loadProducts();
         this.renderInventoryTable();
     }
 
@@ -968,8 +1152,8 @@ class TekelPOS {
         }
 
         tbody.innerHTML = this.products.map(product => {
-            const status = product.quantity === 0 ? 'danger' : 
-                          product.quantity <= 5 ? 'warning' : 'success';
+            const statusClass = product.quantity === 0 ? 'danger' : 
+                              product.quantity <= 5 ? 'warning' : 'success';
             const statusText = product.quantity === 0 ? 'Stokta Yok' : 
                              product.quantity <= 5 ? 'Az Stok' : 'Stokta Var';
             
@@ -986,20 +1170,20 @@ class TekelPOS {
                                data-barcode="${product.barcode}"
                                style="width: 80px; padding: 4px;">
                     </td>
-                    <td>5</td>
+                    <td>${product.min_stock_level || 5}</td>
                     <td>
-                        <span class="status-badge ${status}">${statusText}</span>
+                        <span class="status-badge ${statusClass}">${statusText}</span>
                     </td>
                     <td>
-                        <button class="btn-primary btn-small" onclick="window.pos.saveStock('${product.barcode}')">
+                        <button class="btn-primary btn-small save-stock-btn" data-barcode="${product.barcode}">
                             Kaydet
                         </button>
                     </td>
                     <td>
-                        <button class="btn-primary btn-small" onclick="window.pos.quickAddStock('${product.barcode}', 1)">
+                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="1">
                             +1
                         </button>
-                        <button class="btn-primary btn-small" onclick="window.pos.quickAddStock('${product.barcode}', 5)">
+                        <button class="btn-primary btn-small quick-add-stock" data-barcode="${product.barcode}" data-quantity="5">
                             +5
                         </button>
                     </td>
@@ -1008,7 +1192,7 @@ class TekelPOS {
         }).join('');
     }
 
-    // KAMERA FONKSİYONLARI
+    // KAMERA FONKSİYONLARI - GERÇEK KAMERA
     initCamera() {
         console.log("📱 Kamera sistemi hazırlanıyor...");
         this.resetCameraUI();
@@ -1024,18 +1208,23 @@ class TekelPOS {
         console.log("📷 Kamera başlatılıyor...");
         
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment' }
+            this.videoStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
             });
             
             const videoElement = document.getElementById('videoElement');
             if (videoElement) {
-                videoElement.srcObject = stream;
+                videoElement.srcObject = this.videoStream;
                 
                 const statusEl = document.getElementById('cameraStatus');
                 if (statusEl) statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Kamera aktif';
                 
                 this.scanning = true;
+                this.startBarcodeDetection();
             }
         } catch (error) {
             console.error("Kamera hatası:", error);
@@ -1043,13 +1232,26 @@ class TekelPOS {
         }
     }
 
+    startBarcodeDetection() {
+        // Barkod tespiti için interval
+        this.scanInterval = setInterval(() => {
+            if (!this.scanning) return;
+            this.detectBarcode();
+        }, 1000);
+    }
+
+    detectBarcode() {
+        // Gerçek barkod tespiti burada yapılacak
+        // Şu anlık manuel giriş kullanılıyor
+    }
+
     showManualBarcodeInput() {
         const cameraSection = document.getElementById('cameraSection');
-        if (cameraSection && !document.getElementById('manualBarcodeInput')) {
+        if (cameraSection && !document.getElementById('manualBarcodeSection')) {
             const manualInputHTML = `
-                <div class="manual-barcode-section" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
+                <div class="manual-barcode-section" id="manualBarcodeSection" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #dee2e6;">
                     <h4><i class="fas fa-keyboard"></i> Manuel Barkod Girişi</h4>
-                    <p style="margin-bottom: 15px; color: #666;">Kamera tarama yerine barkodu manuel girebilirsiniz:</p>
+                    <p style="margin-bottom: 15px; color: #666;">Barkodu manuel olarak girin:</p>
                     <div style="display: flex; gap: 10px; align-items: center;">
                         <input type="text" 
                                id="manualBarcodeInput" 
@@ -1059,28 +1261,9 @@ class TekelPOS {
                             <i class="fas fa-check"></i> Ekle
                         </button>
                     </div>
-                    <div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 4px;">
-                        <strong><i class="fas fa-lightbulb"></i> Demo Barkodlar:</strong><br>
-                        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
-                            ${this.demoProducts.map(p => 
-                                `<span class="demo-barcode" style="padding: 4px 8px; background: white; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; cursor: pointer;" 
-                                      onclick="document.getElementById('manualBarcodeInput').value='${p.barcode}'">${p.barcode}</span>`
-                            ).join('')}
-                        </div>
-                    </div>
                 </div>
             `;
             cameraSection.insertAdjacentHTML('beforeend', manualInputHTML);
-            
-            // Manuel input için event listener ekle
-            const manualInput = document.getElementById('manualBarcodeInput');
-            if (manualInput) {
-                manualInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        this.addManualBarcode();
-                    }
-                });
-            }
         }
     }
 
@@ -1109,9 +1292,18 @@ class TekelPOS {
         console.log("📷 Kamera durduruluyor...");
         this.scanning = false;
         
+        if (this.scanInterval) {
+            clearInterval(this.scanInterval);
+            this.scanInterval = null;
+        }
+        
+        if (this.videoStream) {
+            this.videoStream.getTracks().forEach(track => track.stop());
+            this.videoStream = null;
+        }
+        
         const videoElement = document.getElementById('videoElement');
-        if (videoElement && videoElement.srcObject) {
-            videoElement.srcObject.getTracks().forEach(track => track.stop());
+        if (videoElement) {
             videoElement.srcObject = null;
         }
         
@@ -1150,13 +1342,8 @@ class TekelPOS {
             return;
         }
         
-        const product = this.products.find(p => p.barcode === barcode);
-        if (product) {
-            this.quickAddStock(barcode, 1);
-            barcodeInput.value = '';
-        } else {
-            this.showStatus('Ürün bulunamadı', 'error');
-        }
+        await this.quickAddStock(barcode, 1);
+        if (barcodeInput) barcodeInput.value = '';
     }
 
     // RAPORLAR
@@ -1165,10 +1352,30 @@ class TekelPOS {
     }
 
     async loadSalesReport() {
-        this.renderSalesReport();
+        try {
+            const startDate = document.getElementById('reportStartDate')?.value || 
+                new Date().toISOString().split('T')[0];
+            const endDate = document.getElementById('reportEndDate')?.value || 
+                new Date().toISOString().split('T')[0];
+                
+            const response = await fetch(`/api/reports/sales?start_date=${startDate}&end_date=${endDate}`, {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.renderSalesReport(result.report);
+                }
+            }
+        } catch (error) {
+            console.error('Rapor yükleme hatası:', error);
+        }
     }
 
-    renderSalesReport() {
+    renderSalesReport(report) {
         const container = document.getElementById('salesReport');
         if (!container) return;
         
@@ -1176,24 +1383,57 @@ class TekelPOS {
             <div class="report-summary">
                 <div class="report-card">
                     <h4><i class="fas fa-shopping-cart"></i> Toplam Satış</h4>
-                    <div class="amount">0.00 TL</div>
+                    <div class="amount">${(report.total_sales || 0).toFixed(2)} TL</div>
                 </div>
                 <div class="report-card">
                     <h4><i class="fas fa-receipt"></i> Toplam İşlem</h4>
-                    <div class="amount">0</div>
+                    <div class="amount">${report.total_transactions || 0}</div>
                 </div>
                 <div class="report-card">
                     <h4><i class="fas fa-money-bill-wave"></i> Nakit Satış</h4>
-                    <div class="amount">0.00 TL</div>
+                    <div class="amount">${(report.cash_sales || 0).toFixed(2)} TL</div>
                 </div>
                 <div class="report-card">
                     <h4><i class="fas fa-credit-card"></i> Kartlı Satış</h4>
-                    <div class="amount">0.00 TL</div>
+                    <div class="amount">${(report.card_sales || 0).toFixed(2)} TL</div>
                 </div>
             </div>
             <div class="report-details">
                 <h4>Satış Detayları</h4>
-                <p class="empty-state">Henüz satış raporu bulunmuyor</p>
+                ${this.renderSalesDetails(report.details || [])}
+            </div>
+        `;
+    }
+
+    renderSalesDetails(details) {
+        if (details.length === 0) {
+            return '<p class="empty-state">Seçilen tarih aralığında satış bulunamadı</p>';
+        }
+        
+        return `
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Fiş No</th>
+                            <th>Toplam</th>
+                            <th>Ödeme</th>
+                            <th>Personel</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${details.map(sale => `
+                            <tr>
+                                <td>${new Date(sale.sale_date).toLocaleDateString('tr-TR')}</td>
+                                <td>${sale.id}</td>
+                                <td>${parseFloat(sale.total_amount).toFixed(2)} TL</td>
+                                <td>${sale.payment_method === 'nakit' ? 'Nakit' : 'Kredi Kartı'}</td>
+                                <td>${sale.user_name}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
             </div>
         `;
     }
@@ -1205,19 +1445,33 @@ class TekelPOS {
     }
 
     async loadUsers() {
-        this.renderUsers();
+        try {
+            const response = await fetch('/api/admin/users', {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.renderUsers(result.users);
+                }
+            }
+        } catch (error) {
+            console.error('Kullanıcılar yükleme hatası:', error);
+        }
     }
 
-    renderUsers() {
+    renderUsers(users) {
         const container = document.getElementById('usersList');
         if (!container) return;
         
-        const users = [
-            { username: 'admin', full_name: 'Sistem Yöneticisi', role: 'admin', last_login: new Date() },
-            { username: 'kasiyer', full_name: 'Ahmet Yılmaz', role: 'cashier', last_login: new Date() },
-            { username: 'personel', full_name: 'Mehmet Demir', role: 'user', last_login: new Date() }
-        ];
-        
+        if (users.length === 0) {
+            container.innerHTML = '<div class="empty-state">Kullanıcı bulunamadı</div>';
+            return;
+        }
+
         container.innerHTML = users.map(user => `
             <div class="user-card">
                 <div class="user-info">
@@ -1235,13 +1489,32 @@ class TekelPOS {
     }
 
     async loadSystemStats() {
+        try {
+            const response = await fetch('/api/admin/system-stats', {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.renderSystemStats(result.stats);
+                }
+            }
+        } catch (error) {
+            console.error('Sistem istatistikleri yükleme hatası:', error);
+        }
+    }
+
+    renderSystemStats(stats) {
         const totalUsers = document.getElementById('totalUsers');
         const totalSales = document.getElementById('totalSales');
         const totalRevenue = document.getElementById('totalRevenue');
         
-        if (totalUsers) totalUsers.textContent = '3';
-        if (totalSales) totalSales.textContent = '0';
-        if (totalRevenue) totalRevenue.textContent = '0.00 TL';
+        if (totalUsers) totalUsers.textContent = stats.total_users || 0;
+        if (totalSales) totalSales.textContent = stats.total_sales || 0;
+        if (totalRevenue) totalRevenue.textContent = (stats.total_revenue || 0).toFixed(2) + ' TL';
     }
 
     openAddUserModal() {
@@ -1249,16 +1522,113 @@ class TekelPOS {
     }
 
     async createNewUser() {
-        this.showStatus('Kullanıcı oluşturuldu (demo)', 'success');
-        this.closeModal('addUserModal');
+        const username = document.getElementById('newUsername')?.value.trim();
+        const fullName = document.getElementById('newFullName')?.value.trim();
+        const password = document.getElementById('newPassword')?.value;
+        const role = document.getElementById('newUserRole')?.value;
+
+        if (!username || !fullName || !password) {
+            this.showStatus('Lütfen tüm alanları doldurun', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    username: username,
+                    full_name: fullName,
+                    password: password,
+                    role: role
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Kullanıcı oluşturulamadı');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Kullanıcı başarıyla oluşturuldu', 'success');
+                this.closeModal('addUserModal');
+                await this.loadUsers();
+            } else {
+                this.showStatus('Kullanıcı oluşturulurken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Kullanıcı oluşturma hatası:', error);
+            this.showStatus('Kullanıcı oluşturulurken hata: ' + error.message, 'error');
+        }
     }
 
     async loadAuditLogs() {
-        this.showStatus('Denetim kayıtları yenilendi', 'success');
+        try {
+            const response = await fetch('/api/admin/audit-logs', {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                if (result.status === 'success') {
+                    this.renderAuditLogs(result.logs);
+                }
+            }
+        } catch (error) {
+            console.error('Denetim kayıtları yükleme hatası:', error);
+        }
+    }
+
+    renderAuditLogs(logs) {
+        const container = document.getElementById('auditLogs');
+        if (!container) return;
+        
+        if (logs.length === 0) {
+            container.innerHTML = '<div class="empty-state">Denetim kaydı bulunamadı</div>';
+            return;
+        }
+
+        container.innerHTML = logs.map(log => `
+            <div class="audit-log">
+                <div class="log-info">
+                    <strong>${log.user_name}</strong>
+                    <p>${log.action}</p>
+                    <small>${new Date(log.created_at).toLocaleString('tr-TR')}</small>
+                </div>
+            </div>
+        `).join('');
     }
 
     async createBackup() {
-        this.showStatus('Yedekleme oluşturuldu (demo)', 'success');
+        try {
+            const response = await fetch('/api/admin/backup', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Yedek oluşturulamadı');
+            }
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Yedekleme başarıyla oluşturuldu', 'success');
+            } else {
+                this.showStatus('Yedekleme oluşturulurken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Yedekleme hatası:', error);
+            this.showStatus('Yedekleme oluşturulurken hata: ' + error.message, 'error');
+        }
     }
 
     loadBackupInfo() {
@@ -1274,10 +1644,6 @@ class TekelPOS {
                 </button>
             </div>
         `;
-    }
-
-    async loadCashManagement() {
-        this.updateCashStatus(false, 0);
     }
 
     // YARDIMCI FONKSİYONLAR
