@@ -13,6 +13,7 @@ let cashRegister = {
     cardSales: 0
 };
 let allProducts = []; // Tüm ürünlerin kopyası
+let editingProduct = null; // Düzenlenen ürün
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -470,7 +471,7 @@ function loadStockAlerts() {
     }
 }
 
-// Barkod ile ürün ekle - GELİŞTİRİLDİ
+// Barkod ile ürün ekle
 function addProductByBarcode() {
     const barcodeInput = document.getElementById('barcodeInput');
     const barcode = barcodeInput.value.trim();
@@ -498,7 +499,7 @@ function addProductByBarcode() {
     showStatus(`${product.name} sepete eklendi!`, 'success');
 }
 
-// Ürün grid'ini yükle - YENİ EKLENDİ
+// Ürün grid'ini yükle
 function loadProductGrid() {
     const productGrid = document.getElementById('productGrid');
     
@@ -536,7 +537,7 @@ function loadProductGrid() {
     productGrid.innerHTML = gridHTML;
 }
 
-// Grid'den sepete ürün ekle - YENİ EKLENDİ
+// Grid'den sepete ürün ekle
 function addToCartFromGrid(barcode) {
     const product = products.find(p => p.barcode === barcode);
     if (product) {
@@ -544,7 +545,7 @@ function addToCartFromGrid(barcode) {
     }
 }
 
-// Ürünleri filtrele - TAMAMEN YENİLENDİ
+// Ürünleri filtrele
 function filterProducts() {
     const searchTerm = document.getElementById('productSearch').value.toLowerCase().trim();
     const productGrid = document.getElementById('productGrid');
@@ -923,7 +924,7 @@ function printReceipt() {
     printWindow.document.close();
 }
 
-// Ürünleri yükle
+// Ürünleri yükle - DÜZELTİLDİ (Edit/Delete butonları eklendi)
 function loadProducts() {
     const tableBody = document.getElementById('productsTableBody');
     
@@ -953,10 +954,10 @@ function loadProducts() {
                 <td>
                     <div class="action-buttons">
                         <button class="btn-small btn-primary" onclick="editProduct('${product.barcode}')">
-                            <i class="fas fa-edit"></i>
+                            <i class="fas fa-edit"></i> Düzenle
                         </button>
                         <button class="btn-small btn-danger" onclick="deleteProduct('${product.barcode}')">
-                            <i class="fas fa-trash"></i>
+                            <i class="fas fa-trash"></i> Sil
                         </button>
                     </div>
                 </td>
@@ -965,6 +966,97 @@ function loadProducts() {
     });
     
     tableBody.innerHTML = tableHTML;
+}
+
+// Ürün düzenle - YENİ EKLENDİ
+function editProduct(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    editingProduct = product;
+    
+    // Modal formunu doldur
+    document.getElementById('newProductBarcode').value = product.barcode;
+    document.getElementById('newProductName').value = product.name;
+    document.getElementById('newProductPrice').value = product.price;
+    document.getElementById('newProductQuantity').value = product.stock;
+    document.getElementById('newProductMinStock').value = product.minStock;
+    document.getElementById('newProductKDV').value = product.kdv;
+    document.getElementById('newProductOTV').value = product.otv;
+    
+    // Modal başlığını değiştir
+    document.querySelector('#addProductModal .modal-header h3').innerHTML = '<i class="fas fa-edit"></i> Ürünü Düzenle';
+    
+    // Form submit event'ini güncelle
+    const form = document.getElementById('addProductForm');
+    form.onsubmit = updateProduct;
+    
+    openModal('addProductModal');
+}
+
+// Ürün güncelle - YENİ EKLENDİ
+function updateProduct(event) {
+    event.preventDefault();
+    
+    if (!editingProduct) {
+        showStatus('Düzenlenecek ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    const updatedProduct = {
+        barcode: document.getElementById('newProductBarcode').value,
+        name: document.getElementById('newProductName').value,
+        price: parseFloat(document.getElementById('newProductPrice').value),
+        stock: parseInt(document.getElementById('newProductQuantity').value),
+        minStock: parseInt(document.getElementById('newProductMinStock').value),
+        kdv: parseFloat(document.getElementById('newProductKDV').value),
+        otv: parseFloat(document.getElementById('newProductOTV').value)
+    };
+    
+    // Ürünü güncelle
+    const index = products.findIndex(p => p.barcode === editingProduct.barcode);
+    if (index !== -1) {
+        products[index] = updatedProduct;
+    }
+    
+    allProducts = [...products]; // Tüm ürünleri güncelle
+    saveToLocalStorage();
+    closeModal('addProductModal');
+    loadProducts();
+    loadInventory();
+    refreshDashboard();
+    
+    // Formu eski haline getir
+    const form = document.getElementById('addProductForm');
+    form.onsubmit = addNewProduct;
+    document.querySelector('#addProductModal .modal-header h3').innerHTML = '<i class="fas fa-plus-circle"></i> Yeni Ürün Ekle';
+    
+    editingProduct = null;
+    
+    showStatus('Ürün başarıyla güncellendi!', 'success');
+}
+
+// Ürün sil - YENİ EKLENDİ
+function deleteProduct(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    if (confirm(`"${product.name}" ürününü silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
+        // Ürünü sil
+        products = products.filter(p => p.barcode !== barcode);
+        allProducts = [...products]; // Tüm ürünleri güncelle
+        saveToLocalStorage();
+        loadProducts();
+        loadInventory();
+        refreshDashboard();
+        showStatus('Ürün başarıyla silindi!', 'success');
+    }
 }
 
 // Stok durumu belirle
@@ -1189,6 +1281,12 @@ function addStock(barcode, quantity = 1) {
 function openAddProductModal() {
     // Formu temizle
     document.getElementById('addProductForm').reset();
+    // Modal başlığını sıfırla
+    document.querySelector('#addProductModal .modal-header h3').innerHTML = '<i class="fas fa-plus-circle"></i> Yeni Ürün Ekle';
+    // Form submit event'ini sıfırla
+    document.getElementById('addProductForm').onsubmit = addNewProduct;
+    editingProduct = null;
+    
     openModal('addProductModal');
 }
 
