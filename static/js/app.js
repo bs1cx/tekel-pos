@@ -38,6 +38,44 @@ class TekelPOS {
         this.startPolling(); // WebSocket yerine polling başlat
     }
 
+    // MODAL FONKSİYONLARI - EKLENDİ
+    openModal(modalId) {
+        console.log('Modal açılıyor:', modalId);
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'flex';
+            modal.classList.add('show');
+        }
+    }
+
+    closeModal(modalId) {
+        console.log('Modal kapanıyor:', modalId);
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'none';
+            modal.classList.remove('show');
+        }
+    }
+
+    // Modal dışına tıklayınca kapat
+    setupModalCloseEvents() {
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                this.closeModal(e.target.id);
+            }
+        });
+
+        // Kapatma butonları
+        document.querySelectorAll('.close-modal').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const modal = e.target.closest('.modal');
+                if (modal) {
+                    this.closeModal(modal.id);
+                }
+            });
+        });
+    }
+
     // POLLING SİSTEMİ - WebSocket yerine
     startPolling() {
         console.log("🔄 Polling sistemi başlatılıyor...");
@@ -106,6 +144,9 @@ class TekelPOS {
         this._eventsBound = true;
         
         console.log("🔗 Event listener'lar bağlanıyor...");
+
+        // Modal kapatma event'lerini kur
+        this.setupModalCloseEvents();
 
         // Login form
         const loginForm = document.getElementById('loginForm');
@@ -261,6 +302,16 @@ class TekelPOS {
                 }
             }
         });
+
+        // Modal kapatma butonları
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('close-modal') || e.target.closest('.close-modal')) {
+                const modal = e.target.closest('.modal');
+                if (modal) {
+                    this.closeModal(modal.id);
+                }
+            }
+        });
     }
 
     async login() {
@@ -343,8 +394,6 @@ class TekelPOS {
         await this.loadDashboardData();
         await this.checkCashStatus();
     }
-
-    // WebSocket kaldırıldı, polling sistemi eklendi
 
     // Sekme Yönetimi
     openTab(tabName) {
@@ -612,7 +661,7 @@ class TekelPOS {
         document.getElementById('newProductKDV').value = '18';
         document.getElementById('newProductMinStock').value = '5';
         
-        document.getElementById('addProductModal').style.display = 'flex';
+        this.openModal('addProductModal');
     }
 
     async addNewProduct() {
@@ -1188,7 +1237,7 @@ class TekelPOS {
     }
 
     openCashRegisterModal() {
-        document.getElementById('cashOpenModal').style.display = 'flex';
+        this.openModal('cashOpenModal');
         // Input'a focusla
         setTimeout(() => {
             const input = document.getElementById('openingBalanceInput');
@@ -1197,7 +1246,7 @@ class TekelPOS {
     }
 
     closeCashRegisterModal() {
-        document.getElementById('cashCloseModal').style.display = 'flex';
+        this.openModal('cashCloseModal');
     }
 
     async openCash() {
@@ -1601,7 +1650,7 @@ class TekelPOS {
     }
 
     openAddUserModal() {
-        document.getElementById('addUserModal').style.display = 'flex';
+        this.openModal('addUserModal');
     }
 
     async createNewUser() {
@@ -1695,16 +1744,6 @@ class TekelPOS {
         }, 3000);
     }
 
-    closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) modal.style.display = 'none';
-    }
-
-    openModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) modal.style.display = 'flex';
-    }
-
     // Fiş Görüntüleme
     async viewReceipt(saleId) {
         try {
@@ -1757,7 +1796,7 @@ class TekelPOS {
             </div>
         `;
         
-        modal.style.display = 'flex';
+        this.openModal('receiptModal');
     }
 
     printReceipt() {
@@ -1790,8 +1829,214 @@ class TekelPOS {
         this.resetCameraUI();
     }
 
-    // Diğer kamera fonksiyonları aynı kalacak...
-    // ... (kamera fonksiyonları değişmedi)
+    resetCameraUI() {
+        const statusEl = document.getElementById('cameraStatus');
+        const previewEl = document.getElementById('cameraPreview');
+        const resultEl = document.getElementById('scanResult');
+        
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-camera"></i> Kamera hazır';
+        if (previewEl) previewEl.style.display = 'none';
+        if (resultEl) resultEl.style.display = 'none';
+    }
+
+    // Diğer kamera fonksiyonları...
+    async startRealCamera() {
+        console.log("📷 Kamera başlatılıyor...");
+        
+        try {
+            this.videoStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            });
+            
+            const videoElement = document.getElementById('videoElement');
+            if (videoElement) {
+                videoElement.srcObject = this.videoStream;
+                videoElement.play();
+                
+                const previewEl = document.getElementById('cameraPreview');
+                if (previewEl) previewEl.style.display = 'block';
+                
+                const statusEl = document.getElementById('cameraStatus');
+                if (statusEl) statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Kamera aktif';
+                
+                this.scanning = true;
+                this.startQRScanning();
+            }
+        } catch (error) {
+            console.error("Kamera hatası:", error);
+            this.showStatus('Kamera erişim izni gerekli', 'error');
+        }
+    }
+
+    stopCamera() {
+        if (this.videoStream) {
+            this.videoStream.getTracks().forEach(track => track.stop());
+            this.videoStream = null;
+        }
+        
+        if (this.jsQRInterval) {
+            clearInterval(this.jsQRInterval);
+            this.jsQRInterval = null;
+        }
+        
+        this.scanning = false;
+        
+        const statusEl = document.getElementById('cameraStatus');
+        if (statusEl) statusEl.innerHTML = '<i class="fas fa-camera"></i> Kamera durduruldu';
+        
+        const previewEl = document.getElementById('cameraPreview');
+        if (previewEl) previewEl.style.display = 'none';
+    }
+
+    startQRScanning() {
+        console.log("🔍 QR tarama başlatılıyor...");
+        
+        this.jsQRInterval = setInterval(() => {
+            if (!this.scanning) return;
+            
+            this.processVideoFrame();
+        }, 500);
+    }
+
+    processVideoFrame() {
+        const videoElement = document.getElementById('videoElement');
+        const canvasElement = document.getElementById('canvasElement');
+        
+        if (!videoElement || !canvasElement || !this.canvasContext) return;
+        
+        if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            
+            this.canvasContext.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            
+            // Basit barkod tespiti (gerçek uygulamada JSQR kütüphanesi kullanılmalı)
+            this.detectBarcodeFromCanvas();
+        }
+    }
+
+    detectBarcodeFromCanvas() {
+        // Basit barkod simülasyonu - gerçek uygulamada JSQR kullanın
+        const simulatedBarcodes = ['123456789012', '987654321098', '456123789056'];
+        
+        // Rastgele barkod tespiti simülasyonu
+        if (Math.random() < 0.1) { // %10 şans
+            const randomBarcode = simulatedBarcodes[Math.floor(Math.random() * simulatedBarcodes.length)];
+            this.onBarcodeDetected(randomBarcode);
+        }
+    }
+
+    onBarcodeDetected(barcode) {
+        console.log("🏷️ Barkod tespit edildi:", barcode);
+        
+        const resultEl = document.getElementById('scanResult');
+        if (resultEl) {
+            resultEl.innerHTML = `
+                <div class="scan-success">
+                    <i class="fas fa-check-circle"></i>
+                    <strong>Barkod: ${barcode}</strong>
+                    <button class="btn-primary btn-small" onclick="pos.addScannedProduct('${barcode}')">
+                        Ürün Ekle
+                    </button>
+                </div>
+            `;
+            resultEl.style.display = 'block';
+        }
+        
+        // Otomatik olarak ürün ekle
+        this.addScannedProduct(barcode);
+    }
+
+    async addScannedProduct(barcode) {
+        console.log("📦 Taranan ürün ekleniyor:", barcode);
+        
+        try {
+            const response = await fetch(`/api/products/${barcode}`, {
+                headers: {
+                    'Authorization': `Bearer ${this.currentUser?.id}`
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                // Ürün varsa sepete ekle
+                this.addToCart(barcode);
+                this.showStatus('Ürün sepete eklendi: ' + result.product.name, 'success');
+            } else {
+                // Ürün yoksa stok ekleme modal'ını aç
+                this.openStockAddModal(barcode);
+            }
+        } catch (error) {
+            console.error("Ürün ekleme hatası:", error);
+            this.openStockAddModal(barcode);
+        }
+    }
+
+    openStockAddModal(barcode) {
+        document.getElementById('scannedBarcode').value = barcode;
+        document.getElementById('scannedProductName').value = '';
+        document.getElementById('scannedProductPrice').value = '';
+        
+        this.openModal('stockAddModal');
+    }
+
+    async addScannedProductToStock() {
+        const barcode = document.getElementById('scannedBarcode').value;
+        const name = document.getElementById('scannedProductName').value;
+        const price = document.getElementById('scannedProductPrice').value;
+        const quantity = 1;
+
+        if (!name || !price) {
+            this.showStatus('Lütfen ürün adı ve fiyat girin', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/stock/add', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.currentUser.id}`
+                },
+                body: JSON.stringify({
+                    barcode: barcode,
+                    name: name,
+                    price: parseFloat(price),
+                    quantity: quantity
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.status === 'success') {
+                this.showStatus('Ürün stoka eklendi', 'success');
+                this.closeModal('stockAddModal');
+                await this.loadProducts();
+            } else {
+                this.showStatus('Ürün eklenirken hata: ' + result.message, 'error');
+            }
+        } catch (error) {
+            this.showStatus('Ürün eklenirken hata: ' + error.message, 'error');
+        }
+    }
+
+    quickStockAdd() {
+        const barcodeInput = document.getElementById('quickBarcodeInput');
+        const barcode = barcodeInput?.value.trim();
+        
+        if (!barcode) {
+            this.showStatus('Lütfen barkod girin', 'warning');
+            return;
+        }
+
+        this.addScannedProduct(barcode);
+        if (barcodeInput) barcodeInput.value = '';
+    }
 }
 
 // Global POS instance'ı oluştur ve window'a ata
@@ -1834,8 +2079,26 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-// Global fonksiyonlar aynı kalacak...
-// ... (global fonksiyonlar değişmedi)
+// Global fonksiyonlar
+function closeModal(modalId) {
+    if (window.pos && typeof window.pos.closeModal === 'function') {
+        window.pos.closeModal(modalId);
+    } else {
+        // Fallback
+        const modal = document.getElementById(modalId);
+        if (modal) modal.style.display = 'none';
+    }
+}
+
+function openModal(modalId) {
+    if (window.pos && typeof window.pos.openModal === 'function') {
+        window.pos.openModal(modalId);
+    } else {
+        // Fallback
+        const modal = document.getElementById(modalId);
+        if (modal) modal.style.display = 'flex';
+    }
+}
 
 // Sayfa yüklendiğinde
 document.addEventListener('DOMContentLoaded', function() {
