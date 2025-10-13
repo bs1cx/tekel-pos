@@ -16,6 +16,7 @@ let allProducts = []; // Tüm ürünlerin kopyası
 let editingProduct = null; // Düzenlenen ürün
 let cameraStream = null; // Kamera stream'i
 let isCameraActive = false; // Kamera durumu
+let quaggaInitialized = false; // Quagga başlatma durumu
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -1336,7 +1337,7 @@ function addNewProduct(event) {
     showStatus('Ürün başarıyla eklendi!', 'success');
 }
 
-// Kamera aç - TAMAMEN YENİLENDİ
+// Kamera aç - QUAGGA.JS ENTEGRE EDİLDİ
 async function startCamera() {
     const startCameraBtn = document.getElementById('startCameraBtn');
     const stopCameraBtn = document.getElementById('stopCameraBtn');
@@ -1345,17 +1346,9 @@ async function startCamera() {
     const videoElement = document.getElementById('videoElement');
     
     try {
-        // Kameraya erişim iste
-        cameraStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: 'environment', // Arka kamerayı kullan
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
-            } 
-        });
+        // Quagga.js ile barkod taramayı başlat
+        await initializeQuagga();
         
-        // Video element'ine stream'i bağla
-        videoElement.srcObject = cameraStream;
         isCameraActive = true;
         
         // UI güncelleme
@@ -1370,14 +1363,11 @@ async function startCamera() {
             </div>
         `;
         
-        showStatus('Kamera başarıyla açıldı!', 'success');
-        
-        // Barkod taramayı başlat
-        startBarcodeScanning();
+        showStatus('Kamera başarıyla açıldı! Barkod tarama aktif.', 'success');
         
     } catch (error) {
         console.error('Kamera açılamadı:', error);
-        showStatus('Kamera açılamadı! Lütfen kamera iznini kontrol edin.', 'error');
+        showStatus('Kamera açılamadı! Demo moda geçiliyor.', 'error');
         
         // Demo modda çalış (kamera olmadan)
         startCameraBtn.style.display = 'none';
@@ -1386,69 +1376,94 @@ async function startCamera() {
         scanResult.innerHTML = `
             <div class="demo-scanning">
                 <i class="fas fa-mobile-alt"></i>
-                <p>Demo Mod: Kamera simülasyonu</p>
-                <p>Barkod: <strong>8691234567890</strong></p>
-                <button class="btn-primary" onclick="simulateBarcodeScan('8691234567890')">
-                    <i class="fas fa-barcode"></i> Barkod Tara (Demo)
-                </button>
-                <button class="btn-secondary" onclick="simulateBarcodeScan('8691234567891')">
-                    <i class="fas fa-barcode"></i> Diğer Barkod (Demo)
-                </button>
+                <p>Demo Mod: Manuel barkod girişi</p>
+                <div class="demo-barcodes">
+                    <p>Örnek barkodlar:</p>
+                    <div class="barcode-list">
+                        <span onclick="setBarcodeInput('8691234567890')">8691234567890 - Marlboro Red</span>
+                        <span onclick="setBarcodeInput('8691234567891')">8691234567891 - Marlboro Gold</span>
+                        <span onclick="setBarcodeInput('8691234567892')">8691234567892 - Camel Yellow</span>
+                    </div>
+                </div>
+                <div class="manual-input">
+                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin">
+                    <button class="btn-primary" onclick="useManualBarcode()">
+                        <i class="fas fa-check"></i> Kullan
+                    </button>
+                </div>
             </div>
         `;
     }
 }
 
-// Barkod taramayı başlat - YENİ EKLENDİ
-function startBarcodeScanning() {
+// Quagga.js başlat - YENİ EKLENDİ
+function initializeQuagga() {
+    return new Promise((resolve, reject) => {
+        if (quaggaInitialized) {
+            resolve();
+            return;
+        }
+
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.querySelector('#videoElement'),
+                constraints: {
+                    width: 640,
+                    height: 480,
+                    facingMode: "environment" // Arka kamera
+                }
+            },
+            decoder: {
+                readers: [
+                    "ean_reader",
+                    "ean_8_reader",
+                    "code_128_reader",
+                    "code_39_reader",
+                    "upc_reader",
+                    "upc_e_reader"
+                ]
+            },
+            locate: true
+        }, function(err) {
+            if (err) {
+                console.error("Quagga başlatılamadı:", err);
+                reject(err);
+                return;
+            }
+            
+            quaggaInitialized = true;
+            console.log("Quagga başarıyla başlatıldı");
+            
+            // Barkod tespit edildiğinde
+            Quagga.onDetected(function(result) {
+                if (result.codeResult && result.codeResult.code) {
+                    const detectedBarcode = result.codeResult.code;
+                    console.log("Barkod tespit edildi:", detectedBarcode);
+                    handleBarcodeDetection(detectedBarcode);
+                }
+            });
+            
+            Quagga.start();
+            resolve();
+        });
+    });
+}
+
+// Barkod tespit edildiğinde - YENİ EKLENDİ
+function handleBarcodeDetection(barcode) {
     if (!isCameraActive) return;
     
-    const videoElement = document.getElementById('videoElement');
-    const canvasElement = document.getElementById('canvasElement');
-    const canvas = canvasElement.getContext('2d');
+    // Aynı barkodun tekrar tekrar işlenmesini önle
+    if (this.lastDetectedBarcode === barcode) return;
+    this.lastDetectedBarcode = barcode;
     
-    // Tarama döngüsü
-    function scanBarcode() {
-        if (!isCameraActive) return;
-        
-        try {
-            // Canvas'a video frame'ini çiz
-            canvasElement.width = videoElement.videoWidth;
-            canvasElement.height = videoElement.videoHeight;
-            canvas.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
-            
-            // Image data'yı al
-            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-            
-            // Basit barkod simülasyonu (gerçek uygulamada Quagga.js veya benzeri kütüphane kullanılır)
-            simulateBarcodeDetection();
-            
-        } catch (error) {
-            console.error('Barkod tarama hatası:', error);
-        }
-        
-        // Sonraki frame için tekrar çağır
-        if (isCameraActive) {
-            setTimeout(scanBarcode, 1000);
-        }
-    }
+    // 2 saniye sonra resetle
+    setTimeout(() => {
+        this.lastDetectedBarcode = null;
+    }, 2000);
     
-    // Video hazır olduğunda taramayı başlat
-    videoElement.addEventListener('loadeddata', scanBarcode);
-}
-
-// Barkod tespit simülasyonu - YENİ EKLENDİ
-function simulateBarcodeDetection() {
-    // Rastgele barkod tespit simülasyonu (%10 şans)
-    if (Math.random() < 0.1) {
-        const demoBarcodes = ['8691234567890', '8691234567891', '8691234567892', '8691234567893'];
-        const randomBarcode = demoBarcodes[Math.floor(Math.random() * demoBarcodes.length)];
-        simulateBarcodeScan(randomBarcode);
-    }
-}
-
-// Barkod tarama simülasyonu - YENİ EKLENDİ
-function simulateBarcodeScan(barcode) {
     const scanResult = document.getElementById('scanResult');
     
     // Barkodu text input'una yaz
@@ -1472,10 +1487,33 @@ function simulateBarcodeScan(barcode) {
     document.getElementById('manualProductForm').style.display = 'block';
     
     showStatus(`Barkod okundu: ${barcode}`, 'success');
+    
+    // Kamerayı otomatik kapat (isteğe bağlı)
+    // setTimeout(stopCamera, 3000);
+}
+
+// Manuel barkod input'u için - YENİ EKLENDİ
+function setBarcodeInput(barcode) {
+    document.getElementById('manualBarcodeInput').value = barcode;
+}
+
+// Manuel barkod kullan - YENİ EKLENDİ
+function useManualBarcode() {
+    const barcode = document.getElementById('manualBarcodeInput').value.trim();
+    if (barcode) {
+        handleBarcodeDetection(barcode);
+    } else {
+        showStatus('Lütfen barkod girin!', 'error');
+    }
 }
 
 // Kamera kapat - GÜNCELLENDİ
 function stopCamera() {
+    if (quaggaInitialized) {
+        Quagga.stop();
+        quaggaInitialized = false;
+    }
+    
     if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
@@ -1497,7 +1535,7 @@ function stopCamera() {
     showStatus('Kamera kapatıldı.', 'info');
 }
 
-// Hızlı stok ekle - TAMAMEN YENİLENDİ
+// Hızlı stok ekle
 function quickStockAdd() {
     const barcodeInput = document.getElementById('quickBarcodeInput');
     const quantityInput = document.getElementById('quickStockQuantity');
@@ -1536,7 +1574,7 @@ function quickStockAdd() {
     }
 }
 
-// Mobil'den yeni ürün ekle - YENİ EKLENDİ
+// Mobil'den yeni ürün ekle
 function addNewProductFromMobile(event) {
     event.preventDefault();
     
