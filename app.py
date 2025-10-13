@@ -980,14 +980,14 @@ def close_cash(cursor):
 @app.route('/api/reports/sales')
 @require_auth
 def sales_report():
-    date_from = request.args.get('date_from')
-    date_to = request.args.get('date_to')
-    
     conn = None
     cursor = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
         
         query = '''
             SELECT s.*, u.full_name as user_name 
@@ -997,41 +997,28 @@ def sales_report():
         '''
         params = []
         
-        if date_from:
+        if start_date:
             query += ' AND DATE(s.sale_date) >= %s'
-            params.append(date_from)
+            params.append(start_date)
         
-        if date_to:
+        if end_date:
             query += ' AND DATE(s.sale_date) <= %s'
-            params.append(date_to)
+            params.append(end_date)
         
-        query += ' ORDER BY s.sale_date DESC LIMIT 1000'
+        query += ' ORDER BY s.sale_date DESC'
         
         cursor.execute(query, params)
         sales = cursor.fetchall()
         
-        # Satış detaylarını getir
-        sales_with_items = []
-        for sale in sales:
-            cursor.execute(
-                'SELECT * FROM sale_items WHERE sale_id = %s',
-                (sale['id'],)
-            )
-            items = cursor.fetchall()
-            
-            sale_dict = dict(sale)
-            sale_dict['items'] = [dict(item) for item in items]
-            sales_with_items.append(sale_dict)
-        
         return jsonify({
             'status': 'success',
-            'sales': sales_with_items
+            'sales': [dict(sale) for sale in sales]
         })
     except Exception as e:
         logger.error(f"Sales report error: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': 'Rapor alınırken hata oluştu'
+            'message': 'Satış raporu alınırken hata oluştu'
         }), 500
     finally:
         if cursor:
@@ -1068,8 +1055,8 @@ def stock_report():
         
         return jsonify({
             'status': 'success',
-            'low_stock': [dict(item) for item in low_stock],
-            'movements': [dict(item) for item in movements]
+            'low_stock': [dict(product) for product in low_stock],
+            'movements': [dict(movement) for movement in movements]
         })
     except Exception as e:
         logger.error(f"Stock report error: {str(e)}")
@@ -1083,7 +1070,7 @@ def stock_report():
         if conn:
             conn.close()
 
-# YARDIMCI FONKSİYONLAR
+# Denetim kaydı fonksiyonu
 def log_audit(user_id, action, description, ip_address=None):
     """Denetim kaydı ekle"""
     conn = None
@@ -1098,21 +1085,12 @@ def log_audit(user_id, action, description, ip_address=None):
         )
         conn.commit()
     except Exception as e:
-        logger.error(f"Audit log error: {e}")
+        logger.error(f"Audit log error: {str(e)}")
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-
-# Uygulama başlatma
-@app.before_first_request
-def startup():
-    try:
-        init_db()
-        logger.info("Application startup completed")
-    except Exception as e:
-        logger.error(f"Startup error: {e}")
 
 # Hata yönetimi
 @app.errorhandler(404)
@@ -1124,26 +1102,35 @@ def not_found(error):
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"Internal server error: {error}")
+    logger.error(f"Internal server error: {str(error)}")
     return jsonify({
         'status': 'error',
-        'message': 'Sunucu hatası'
+        'message': 'Sunucu hatası oluştu'
     }), 500
 
-# Render için WSGI uyumluluğu
-app = app
-
+# Uygulama başlatma
 if __name__ == '__main__':
     try:
+        logger.info("Initializing database...")
         init_db()
-        logger.info("Starting Flask application...")
-        
-        port = int(os.environ.get('PORT', 5000))
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+    
+    # Render için port ayarı
+    port = int(os.environ.get('PORT', 5000))
+    
+    # Render'da production modunda çalıştır
+    if os.environ.get('RENDER'):
+        # Production için Waitress kullan
+        from waitress import serve
+        logger.info(f"Starting production server on port {port}")
+        serve(app, host='0.0.0.0', port=port)
+    else:
+        # Development için Flask built-in server
+        logger.info(f"Starting development server on port {port}")
         app.run(
             host='0.0.0.0', 
-            port=port,
-            debug=False
+            port=port, 
+            debug=True
         )
-    except Exception as e:
-        logger.error(f"Application startup failed: {e}")
-        raise
