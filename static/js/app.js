@@ -4,6 +4,7 @@
 let currentUser = null;
 let products = [];
 let cart = [];
+let salesHistory = [];
 let cashRegister = {
     isOpen: false,
     openingBalance: 0,
@@ -279,6 +280,7 @@ function loadFromLocalStorage() {
     const savedProducts = localStorage.getItem('products');
     const savedCart = localStorage.getItem('cart');
     const savedCashRegister = localStorage.getItem('cashRegister');
+    const savedSalesHistory = localStorage.getItem('salesHistory');
     
     if (savedProducts) {
         products = JSON.parse(savedProducts);
@@ -292,6 +294,10 @@ function loadFromLocalStorage() {
     if (savedCashRegister) {
         cashRegister = JSON.parse(savedCashRegister);
     }
+    
+    if (savedSalesHistory) {
+        salesHistory = JSON.parse(savedSalesHistory);
+    }
 }
 
 // LocalStorage'a kaydet
@@ -299,11 +305,14 @@ function saveToLocalStorage() {
     localStorage.setItem('products', JSON.stringify(products));
     localStorage.setItem('cart', JSON.stringify(cart));
     localStorage.setItem('cashRegister', JSON.stringify(cashRegister));
+    localStorage.setItem('salesHistory', JSON.stringify(salesHistory));
 }
 
-// Dashboard'u yenile
+// Dashboard'u yenile - DÜZELTİLDİ
 function refreshDashboard() {
-    // İstatistikleri hesapla
+    console.log('Dashboard yenileniyor...');
+    
+    // Gerçek zamanlı verileri hesapla
     const todaySales = calculateTodaySales();
     const totalProducts = products.length;
     const lowStockCount = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
@@ -315,28 +324,68 @@ function refreshDashboard() {
     document.getElementById('lowStockCount').textContent = lowStockCount;
     document.getElementById('outOfStockCount').textContent = outOfStockCount;
     
-    // Son satışları ve stok uyarılarını yükle
+    // Son satışları ve stok uyarılarını yenile
     loadRecentSales();
     loadStockAlerts();
+    
+    console.log('Dashboard başarıyla yenilendi!');
 }
 
-// Bugünkü satışları hesapla
+// Bugünkü satışları GERÇEK verilerle hesapla - DÜZELTİLDİ
 function calculateTodaySales() {
-    // Demo amaçlı sabit değer
-    // Gerçek uygulamada veritabanından alınmalı
-    return 1250.75;
+    const today = new Date().toDateString();
+    let totalSales = 0;
+    
+    // Bugünkü satışları filtrele ve topla
+    const todaySales = salesHistory.filter(sale => {
+        const saleDate = new Date(sale.timestamp).toDateString();
+        return saleDate === today;
+    });
+    
+    todaySales.forEach(sale => {
+        totalSales += sale.totalAmount;
+    });
+    
+    return totalSales;
 }
 
-// Son satışları yükle
+// Son satışları GERÇEK verilerle yükle - DÜZELTİLDİ
 function loadRecentSales() {
     const recentSalesContainer = document.getElementById('recentSales');
-    // Demo veri
-    recentSalesContainer.innerHTML = `
-        <div class="empty-state">
-            <i class="fas fa-receipt"></i>
-            <p>Henüz satış yapılmadı</p>
-        </div>
-    `;
+    
+    // Son 5 satışı al (en yeniden eskiye)
+    const recentSales = salesHistory.slice(-5).reverse();
+    
+    if (recentSales.length === 0) {
+        recentSalesContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-receipt"></i>
+                <p>Henüz satış yapılmadı</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let salesHTML = '';
+    recentSales.forEach(sale => {
+        const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
+        salesHTML += `
+            <div class="activity-item">
+                <div class="activity-icon">
+                    <i class="fas fa-shopping-cart"></i>
+                </div>
+                <div class="activity-info">
+                    <strong>${sale.totalAmount.toFixed(2)} TL</strong>
+                    <span>${saleDate}</span>
+                </div>
+                <div class="activity-badge">
+                    ${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}
+                </div>
+            </div>
+        `;
+    });
+    
+    recentSalesContainer.innerHTML = salesHTML;
 }
 
 // Stok uyarılarını yükle
@@ -556,7 +605,7 @@ function toggleCashInput() {
     }
 }
 
-// Satışı tamamla
+// Satışı tamamla - DÜZELTİLDİ (Sales History eklendi)
 function completeSale() {
     if (cart.length === 0) {
         showStatus('Sepet boş!', 'error');
@@ -580,6 +629,20 @@ function completeSale() {
         }
     });
     
+    // Satış geçmişine ekle - YENİ EKLENDİ
+    const saleRecord = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        items: [...cart],
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod,
+        cashAmount: cashAmount,
+        change: paymentMethod === 'nakit' ? cashAmount - totalAmount : 0,
+        user: currentUser.username
+    };
+    
+    salesHistory.push(saleRecord);
+    
     // Kasa kaydını güncelle
     if (cashRegister.isOpen) {
         if (paymentMethod === 'nakit') {
@@ -602,7 +665,7 @@ function completeSale() {
     document.querySelector('input[name="paymentMethod"][value="nakit"]').checked = true;
     toggleCashInput();
     
-    // Dashboard'u yenile
+    // Dashboard'u yenile - YENİ EKLENDİ
     refreshDashboard();
     
     // Fiş göster
@@ -976,6 +1039,7 @@ function addStock(barcode, quantity = 1) {
         product.stock += quantity;
         saveToLocalStorage();
         loadInventory();
+        refreshDashboard(); // Dashboard'u da güncelle
         showStatus(`${product.name} stok eklendi: +${quantity}`, 'success');
     }
 }
@@ -1012,6 +1076,7 @@ function addNewProduct(event) {
     closeModal('addProductModal');
     loadProducts();
     loadInventory();
+    refreshDashboard(); // Dashboard'u da güncelle
     showStatus('Ürün başarıyla eklendi!', 'success');
 }
 
