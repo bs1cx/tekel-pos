@@ -1,7 +1,7 @@
 #!/bin/bash
-echo "Build başlıyor..."
+echo "🚀 Build başlıyor..."
 
-# Python paketlerini yükle
+pip install --upgrade pip
 pip install -r requirements.txt
 
-echo "Build tamamlandı!"
+echo "✅ Build tamamlandı!"
