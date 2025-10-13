@@ -63,6 +63,7 @@ def get_db_connection():
             if attempt < max_retries - 1:
                 time.sleep(retry_delay)
             else:
+                logger.error(f"All connection attempts failed: {e}")
                 raise
 
 # Decorator'lar
@@ -311,6 +312,7 @@ def init_db():
         
     except Exception as e:
         logger.error(f"Database initialization error: {e}")
+        logger.error(traceback.format_exc())
         if conn:
             conn.rollback()
         raise
@@ -358,6 +360,13 @@ def index():
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.get_json()
+    
+    if not data:
+        return jsonify({
+            'status': 'error',
+            'message': 'Geçersiz JSON verisi'
+        }), 400
+    
     username = data.get('username')
     password = data.get('password')
     
@@ -374,6 +383,8 @@ def login():
         cursor = conn.cursor()
         
         hashed_password = hash_password(password)
+        logger.info(f"Login attempt for username: {username}")
+        
         cursor.execute(
             'SELECT * FROM users WHERE username = %s AND password = %s',
             (username, hashed_password)
@@ -391,6 +402,8 @@ def login():
             # Denetim kaydı ekle
             log_audit(user['id'], 'login', f'{user["username"]} giriş yaptı', request.remote_addr)
             
+            logger.info(f"Successful login for user: {username}")
+            
             return jsonify({
                 'status': 'success',
                 'user': {
@@ -402,6 +415,7 @@ def login():
                 'token': str(user['id'])  # Basit token (gerçek uygulamada JWT kullanın)
             })
         else:
+            logger.warning(f"Failed login attempt for username: {username}")
             return jsonify({
                 'status': 'error',
                 'message': 'Geçersiz kullanıcı adı veya şifre'
@@ -409,6 +423,7 @@ def login():
             
     except Exception as e:
         logger.error(f"Login error: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({
             'status': 'error',
             'message': 'Giriş işlemi sırasında hata oluştu'
@@ -1103,6 +1118,7 @@ def not_found(error):
 @app.errorhandler(500)
 def internal_error(error):
     logger.error(f"Internal server error: {str(error)}")
+    logger.error(traceback.format_exc())
     return jsonify({
         'status': 'error',
         'message': 'Sunucu hatası oluştu'
@@ -1116,6 +1132,7 @@ if __name__ == '__main__':
         logger.info("Database initialized successfully")
     except Exception as e:
         logger.error(f"Database initialization failed: {e}")
+        logger.error(traceback.format_exc())
     
     # Render için port ayarı
     port = int(os.environ.get('PORT', 5000))
