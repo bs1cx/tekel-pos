@@ -12,6 +12,7 @@ let cashRegister = {
     cashSales: 0,
     cardSales: 0
 };
+let allProducts = []; // Tüm ürünlerin kopyası
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -29,6 +30,9 @@ function initializeApp() {
     
     // LocalStorage'dan verileri yükle
     loadFromLocalStorage();
+    
+    // Tüm ürünleri kopyala
+    allProducts = [...products];
     
     // Dashboard'u güncelle
     refreshDashboard();
@@ -49,6 +53,26 @@ function setupEventListeners() {
             if (e.key === 'Enter') {
                 addProductByBarcode();
             }
+        });
+        
+        // Barkod input'una real-time dinleme ekle
+        barcodeInput.addEventListener('input', function(e) {
+            // Otomatik tarama için (barkod okuyucular genellikle hızlı giriş yapar)
+            if (this.value.length >= 8) {
+                setTimeout(() => {
+                    if (this.value.length >= 8) {
+                        addProductByBarcode();
+                    }
+                }, 100);
+            }
+        });
+    }
+    
+    // Ürün arama input'u
+    const productSearch = document.getElementById('productSearch');
+    if (productSearch) {
+        productSearch.addEventListener('input', function(e) {
+            filterProducts();
         });
     }
     
@@ -179,6 +203,7 @@ function switchTab(tabName) {
         case 'sales':
             // Satış sekmesine özel ayarlar
             document.getElementById('barcodeInput').focus();
+            loadProductGrid(); // Ürün grid'ini yükle
             break;
         case 'reports':
             loadReports();
@@ -269,6 +294,33 @@ function loadDemoProducts() {
                 minStock: 5,
                 kdv: 18,
                 otv: 0
+            },
+            {
+                barcode: '8691234567895',
+                name: 'Samsun Siyah',
+                price: 38.00,
+                stock: 20,
+                minStock: 5,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567896',
+                name: 'Tekel 2000',
+                price: 42.50,
+                stock: 35,
+                minStock: 8,
+                kdv: 18,
+                otv: 0
+            },
+            {
+                barcode: '8691234567897',
+                name: 'L&M Red',
+                price: 41.00,
+                stock: 28,
+                minStock: 6,
+                kdv: 18,
+                otv: 0
             }
         ];
         saveToLocalStorage();
@@ -308,7 +360,7 @@ function saveToLocalStorage() {
     localStorage.setItem('salesHistory', JSON.stringify(salesHistory));
 }
 
-// Dashboard'u yenile - DÜZELTİLDİ
+// Dashboard'u yenile
 function refreshDashboard() {
     console.log('Dashboard yenileniyor...');
     
@@ -331,7 +383,7 @@ function refreshDashboard() {
     console.log('Dashboard başarıyla yenilendi!');
 }
 
-// Bugünkü satışları GERÇEK verilerle hesapla - DÜZELTİLDİ
+// Bugünkü satışları GERÇEK verilerle hesapla
 function calculateTodaySales() {
     const today = new Date().toDateString();
     let totalSales = 0;
@@ -349,7 +401,7 @@ function calculateTodaySales() {
     return totalSales;
 }
 
-// Son satışları GERÇEK verilerle yükle - DÜZELTİLDİ
+// Son satışları GERÇEK verilerle yükle
 function loadRecentSales() {
     const recentSalesContainer = document.getElementById('recentSales');
     
@@ -418,7 +470,7 @@ function loadStockAlerts() {
     }
 }
 
-// Barkod ile ürün ekle
+// Barkod ile ürün ekle - GELİŞTİRİLDİ
 function addProductByBarcode() {
     const barcodeInput = document.getElementById('barcodeInput');
     const barcode = barcodeInput.value.trim();
@@ -443,6 +495,96 @@ function addProductByBarcode() {
     addToCart(product);
     barcodeInput.value = '';
     barcodeInput.focus();
+    showStatus(`${product.name} sepete eklendi!`, 'success');
+}
+
+// Ürün grid'ini yükle - YENİ EKLENDİ
+function loadProductGrid() {
+    const productGrid = document.getElementById('productGrid');
+    
+    if (products.length === 0) {
+        productGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-box-open"></i>
+                <p>Ürün bulunamadı</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let gridHTML = '';
+    products.forEach(product => {
+        if (product.stock > 0) { // Sadece stokta olan ürünleri göster
+            gridHTML += `
+                <div class="product-card" data-barcode="${product.barcode}" data-name="${product.name.toLowerCase()}">
+                    <div class="product-info">
+                        <h4>${product.name}</h4>
+                        <div class="product-details">
+                            <span class="product-price">${product.price.toFixed(2)} TL</span>
+                            <span class="product-stock">Stok: ${product.stock}</span>
+                        </div>
+                        <div class="product-barcode">${product.barcode}</div>
+                    </div>
+                    <button class="btn-primary btn-small" onclick="addToCartFromGrid('${product.barcode}')">
+                        <i class="fas fa-plus"></i> Ekle
+                    </button>
+                </div>
+            `;
+        }
+    });
+    
+    productGrid.innerHTML = gridHTML;
+}
+
+// Grid'den sepete ürün ekle - YENİ EKLENDİ
+function addToCartFromGrid(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (product) {
+        addToCart(product);
+    }
+}
+
+// Ürünleri filtrele - TAMAMEN YENİLENDİ
+function filterProducts() {
+    const searchTerm = document.getElementById('productSearch').value.toLowerCase().trim();
+    const productGrid = document.getElementById('productGrid');
+    const productCards = productGrid.getElementsByClassName('product-card');
+    
+    let hasVisibleProducts = false;
+    
+    for (let card of productCards) {
+        const productName = card.getAttribute('data-name');
+        const productBarcode = card.getAttribute('data-barcode');
+        
+        // İsim veya barkodda arama yap
+        const matchesSearch = productName.includes(searchTerm) || 
+                            productBarcode.includes(searchTerm);
+        
+        if (matchesSearch) {
+            card.style.display = 'flex';
+            hasVisibleProducts = true;
+        } else {
+            card.style.display = 'none';
+        }
+    }
+    
+    // Eğer hiç ürün görünmüyorsa mesaj göster
+    if (!hasVisibleProducts && searchTerm) {
+        productGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>"${searchTerm}" için ürün bulunamadı</p>
+                <small>Farklı bir anahtar kelime deneyin</small>
+            </div>
+        `;
+    } else if (!hasVisibleProducts) {
+        productGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-box-open"></i>
+                <p>Ürün bulunamadı</p>
+            </div>
+        `;
+    }
 }
 
 // Sepete ürün ekle
@@ -463,7 +605,6 @@ function addToCart(product) {
     }
     
     updateCartDisplay();
-    showStatus(`${product.name} sepete eklendi!`, 'success');
 }
 
 // Sepet görünümünü güncelle
@@ -605,7 +746,7 @@ function toggleCashInput() {
     }
 }
 
-// Satışı tamamla - DÜZELTİLDİ (Sales History eklendi)
+// Satışı tamamla
 function completeSale() {
     if (cart.length === 0) {
         showStatus('Sepet boş!', 'error');
@@ -629,7 +770,7 @@ function completeSale() {
         }
     });
     
-    // Satış geçmişine ekle - YENİ EKLENDİ
+    // Satış geçmişine ekle
     const saleRecord = {
         id: Date.now(),
         timestamp: new Date().toISOString(),
@@ -665,7 +806,7 @@ function completeSale() {
     document.querySelector('input[name="paymentMethod"][value="nakit"]').checked = true;
     toggleCashInput();
     
-    // Dashboard'u yenile - YENİ EKLENDİ
+    // Dashboard'u yenile
     refreshDashboard();
     
     // Fiş göster
@@ -1072,6 +1213,7 @@ function addNewProduct(event) {
     }
     
     products.push(newProduct);
+    allProducts = [...products]; // Tüm ürünleri güncelle
     saveToLocalStorage();
     closeModal('addProductModal');
     loadProducts();
