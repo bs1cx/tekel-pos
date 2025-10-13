@@ -35,27 +35,38 @@ app = Flask(__name__,
 # Güvenli secret key
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
-# PostgreSQL connection - Render için basitleştirilmiş
+# Database bağlantısı ve init kontrolü
+_db_initialized = False
+_db_init_lock = Lock()
+
 def get_db_connection():
-    """Render PostgreSQL bağlantısı"""
+    """Supabase PostgreSQL bağlantısı"""
     max_retries = 3
     retry_delay = 1
     
     for attempt in range(max_retries):
         try:
-            # Render environment variable'ını kullan
-            database_url = os.environ.get('DATABASE_URL')
+            # Supabase environment variables'larını kullan
+            db_host = os.environ.get('POSTGRES_HOST')
+            db_user = os.environ.get('POSTGRES_USER')
+            db_password = os.environ.get('POSTGRES_PASSWORD')
+            db_name = os.environ.get('POSTGRES_DATABASE')
             
-            if not database_url:
-                # Fallback olarak Supabase
-                database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require"
+            # Connection string oluştur
+            if db_host and db_user and db_password and db_name:
+                database_url = f"postgresql://{db_user}:{db_password}@{db_host}:5432/{db_name}"
+            else:
+                # Fallback olarak DATABASE_URL veya direct Supabase URL
+                database_url = os.environ.get('DATABASE_URL')
+                if not database_url:
+                    database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
             
-            logger.info(f"Database connection attempt {attempt + 1}")
+            logger.info(f"Supabase connection attempt {attempt + 1}")
             conn = psycopg2.connect(
                 database_url,
                 cursor_factory=RealDictCursor
             )
-            logger.info("Database connection successful")
+            logger.info("Supabase connection successful")
             return conn
                 
         except Exception as e:
@@ -65,6 +76,26 @@ def get_db_connection():
             else:
                 logger.error(f"All connection attempts failed: {e}")
                 raise
+
+def ensure_db_initialized():
+    """Database'in initialize edildiğinden emin ol"""
+    global _db_initialized
+    
+    if _db_initialized:
+        return True
+    
+    with _db_init_lock:
+        if _db_initialized:
+            return True
+            
+        try:
+            init_db()
+            _db_initialized = True
+            logger.info("Database initialization completed")
+            return True
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            return False
 
 # Decorator'lar
 def require_auth(f):
@@ -173,117 +204,139 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Kullanıcılar tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                full_name TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'user',
-                last_login TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        logger.info("Starting Supabase database initialization...")
         
-        # Ürünler tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS products (
-                id SERIAL PRIMARY KEY,
-                barcode TEXT UNIQUE NOT NULL,
-                name TEXT NOT NULL,
-                price REAL NOT NULL CHECK (price >= 0),
-                quantity INTEGER DEFAULT 0 CHECK (quantity >= 0),
-                kdv REAL DEFAULT 18 CHECK (kdv >= 0),
-                otv REAL DEFAULT 0 CHECK (otv >= 0),
-                min_stock_level INTEGER DEFAULT 5 CHECK (min_stock_level >= 0),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # Önce tabloların var olup olmadığını kontrol et
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'users'
+            );
+        """)
+        users_table_exists = cursor.fetchone()['exists']
         
-        # Satışlar tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sales (
-                id SERIAL PRIMARY KEY,
-                total_amount REAL NOT NULL CHECK (total_amount >= 0),
-                payment_method TEXT NOT NULL,
-                cash_amount REAL DEFAULT 0 CHECK (cash_amount >= 0),
-                credit_card_amount REAL DEFAULT 0 CHECK (credit_card_amount >= 0),
-                change_amount REAL DEFAULT 0 CHECK (change_amount >= 0),
-                user_id INTEGER,
-                sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-            )
-        ''')
-        
-        # Satış detayları tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sale_items (
-                id SERIAL PRIMARY KEY,
-                sale_id INTEGER,
-                barcode TEXT NOT NULL,
-                product_name TEXT NOT NULL,
-                quantity INTEGER NOT NULL CHECK (quantity > 0),
-                price REAL NOT NULL CHECK (price >= 0),
-                FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # Stok hareketleri tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS stock_movements (
-                id SERIAL PRIMARY KEY,
-                barcode TEXT NOT NULL,
-                product_name TEXT NOT NULL,
-                movement_type TEXT NOT NULL,
-                quantity INTEGER NOT NULL,
-                user_id INTEGER,
-                movement_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-            )
-        ''')
-        
-        # Kasa durumu tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS cash_register (
-                id SERIAL PRIMARY KEY,
-                is_open BOOLEAN DEFAULT FALSE,
-                current_amount REAL DEFAULT 0 CHECK (current_amount >= 0),
-                opening_balance REAL DEFAULT 0 CHECK (opening_balance >= 0),
-                opening_time TIMESTAMP,
-                closing_time TIMESTAMP,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Kasa hareketleri tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS cash_transactions (
-                id SERIAL PRIMARY KEY,
-                transaction_type TEXT NOT NULL,
-                amount REAL NOT NULL,
-                user_id INTEGER,
-                transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                description TEXT,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-            )
-        ''')
-        
-        # Denetim kayıtları tablosu
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS audit_logs (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER,
-                action TEXT NOT NULL,
-                description TEXT,
-                ip_address TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
-            )
-        ''')
-        
-        # Varsayılan kullanıcıları ekle (hash'lenmiş şifrelerle)
-        try:
+        if not users_table_exists:
+            logger.info("Creating tables in Supabase...")
+            
+            # Kullanıcılar tablosu
+            cursor.execute('''
+                CREATE TABLE users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    last_login TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            logger.info("Users table created")
+            
+            # Ürünler tablosu
+            cursor.execute('''
+                CREATE TABLE products (
+                    id SERIAL PRIMARY KEY,
+                    barcode TEXT UNIQUE NOT NULL,
+                    name TEXT NOT NULL,
+                    price REAL NOT NULL CHECK (price >= 0),
+                    quantity INTEGER DEFAULT 0 CHECK (quantity >= 0),
+                    kdv REAL DEFAULT 18 CHECK (kdv >= 0),
+                    otv REAL DEFAULT 0 CHECK (otv >= 0),
+                    min_stock_level INTEGER DEFAULT 5 CHECK (min_stock_level >= 0),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            logger.info("Products table created")
+            
+            # Satışlar tablosu
+            cursor.execute('''
+                CREATE TABLE sales (
+                    id SERIAL PRIMARY KEY,
+                    total_amount REAL NOT NULL CHECK (total_amount >= 0),
+                    payment_method TEXT NOT NULL,
+                    cash_amount REAL DEFAULT 0 CHECK (cash_amount >= 0),
+                    credit_card_amount REAL DEFAULT 0 CHECK (credit_card_amount >= 0),
+                    change_amount REAL DEFAULT 0 CHECK (change_amount >= 0),
+                    user_id INTEGER,
+                    sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+                )
+            ''')
+            logger.info("Sales table created")
+            
+            # Satış detayları tablosu
+            cursor.execute('''
+                CREATE TABLE sale_items (
+                    id SERIAL PRIMARY KEY,
+                    sale_id INTEGER,
+                    barcode TEXT NOT NULL,
+                    product_name TEXT NOT NULL,
+                    quantity INTEGER NOT NULL CHECK (quantity > 0),
+                    price REAL NOT NULL CHECK (price >= 0),
+                    FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+                )
+            ''')
+            logger.info("Sale items table created")
+            
+            # Stok hareketleri tablosu
+            cursor.execute('''
+                CREATE TABLE stock_movements (
+                    id SERIAL PRIMARY KEY,
+                    barcode TEXT NOT NULL,
+                    product_name TEXT NOT NULL,
+                    movement_type TEXT NOT NULL,
+                    quantity INTEGER NOT NULL,
+                    user_id INTEGER,
+                    movement_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+                )
+            ''')
+            logger.info("Stock movements table created")
+            
+            # Kasa durumu tablosu
+            cursor.execute('''
+                CREATE TABLE cash_register (
+                    id SERIAL PRIMARY KEY,
+                    is_open BOOLEAN DEFAULT FALSE,
+                    current_amount REAL DEFAULT 0 CHECK (current_amount >= 0),
+                    opening_balance REAL DEFAULT 0 CHECK (opening_balance >= 0),
+                    opening_time TIMESTAMP,
+                    closing_time TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            logger.info("Cash register table created")
+            
+            # Kasa hareketleri tablosu
+            cursor.execute('''
+                CREATE TABLE cash_transactions (
+                    id SERIAL PRIMARY KEY,
+                    transaction_type TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    user_id INTEGER,
+                    transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    description TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+                )
+            ''')
+            logger.info("Cash transactions table created")
+            
+            # Denetim kayıtları tablosu
+            cursor.execute('''
+                CREATE TABLE audit_logs (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER,
+                    action TEXT NOT NULL,
+                    description TEXT,
+                    ip_address TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+                )
+            ''')
+            logger.info("Audit logs table created")
+            
+            # Varsayılan kullanıcıları ekle (hash'lenmiş şifrelerle)
             cursor.execute(
                 'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
                 ('admin', hash_password('admin123'), 'Sistem Yöneticisi', 'admin')
@@ -296,22 +349,21 @@ def init_db():
                 'INSERT INTO users (username, password, full_name, role) VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING',
                 ('personel', hash_password('personel123'), 'Personel Kullanıcı', 'user')
             )
-        except Exception as e:
-            logger.warning(f"Kullanıcı ekleme hatası: {e}")
-        
-        # Varsayılan kasa durumu
-        try:
+            logger.info("Default users created")
+            
+            # Varsayılan kasa durumu
             cursor.execute(
                 'INSERT INTO cash_register (id, is_open, current_amount, opening_balance) VALUES (1, FALSE, 0, 0) ON CONFLICT (id) DO NOTHING'
             )
-        except Exception as e:
-            logger.warning(f"Kasa durumu ekleme hatası: {e}")
-        
-        conn.commit()
-        logger.info("Database initialized successfully")
+            logger.info("Cash register default state created")
+            
+            conn.commit()
+            logger.info("All tables created successfully in Supabase")
+        else:
+            logger.info("Tables already exist in Supabase, skipping creation")
         
     except Exception as e:
-        logger.error(f"Database initialization error: {e}")
+        logger.error(f"Supabase database initialization error: {e}")
         logger.error(traceback.format_exc())
         if conn:
             conn.rollback()
@@ -331,6 +383,9 @@ def serve_static(path):
 @app.route('/')
 def index():
     try:
+        # Database'i initialize et
+        ensure_db_initialized()
+        
         # IP adresini al
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
@@ -359,6 +414,13 @@ def index():
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
+    # Önce database'in initialize edildiğinden emin ol
+    if not ensure_db_initialized():
+        return jsonify({
+            'status': 'error',
+            'message': 'Database başlatılamadı. Lütfen daha sonra tekrar deneyin.'
+        }), 500
+    
     data = request.get_json()
     
     if not data:
@@ -1123,6 +1185,12 @@ def internal_error(error):
         'status': 'error',
         'message': 'Sunucu hatası oluştu'
     }), 500
+
+@app.before_request
+def before_request():
+    """Her request'ten önce database'in hazır olduğundan emin ol"""
+    if request.endpoint and request.endpoint != 'static':
+        ensure_db_initialized()
 
 # Uygulama başlatma
 if __name__ == '__main__':
