@@ -38,44 +38,67 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 # Database bağlantısı ve init kontrolü
 _db_initialized = False
 _db_init_lock = Lock()
+_db_pool = None
+_db_pool_lock = Lock()
+
 
 def get_db_connection():
-    """Supabase PostgreSQL bağlantısı"""
+    """Supabase PostgreSQL bağlantısı (connection pool ile)"""
+    global _db_pool
     max_retries = 3
     retry_delay = 1
-    
+
+    # Pool yoksa oluştur
+    if _db_pool is None:
+        with _db_pool_lock:
+            if _db_pool is None:
+                try:
+                    db_host = os.environ.get('POSTGRES_HOST')
+                    db_user = os.environ.get('POSTGRES_USER')
+                    db_password = os.environ.get('POSTGRES_PASSWORD')
+                    db_name = os.environ.get('POSTGRES_DATABASE')
+
+                    if db_host and db_user and db_password and db_name:
+                        database_url = f"postgresql://{db_user}:{db_password}@{db_host}:5432/{db_name}"
+                    else:
+                        database_url = os.environ.get('DATABASE_URL')
+                        if not database_url:
+                            database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
+
+                    logger.info("Creating new PostgreSQL connection pool...")
+                    _db_pool = psycopg2.pool.SimpleConnectionPool(
+                        1, 5,
+                        database_url,
+                        cursor_factory=RealDictCursor
+                    )
+                    logger.info("PostgreSQL connection pool created successfully")
+                except Exception as e:
+                    logger.error(f"Failed to create database pool: {e}")
+                    raise
+
+    # Havuzdan bağlantı al
     for attempt in range(max_retries):
         try:
-            # Supabase environment variables'larını kullan
-            db_host = os.environ.get('POSTGRES_HOST')
-            db_user = os.environ.get('POSTGRES_USER')
-            db_password = os.environ.get('POSTGRES_PASSWORD')
-            db_name = os.environ.get('POSTGRES_DATABASE')
-            
-            # Connection string oluştur
-            if db_host and db_user and db_password and db_name:
-                database_url = f"postgresql://{db_user}:{db_password}@{db_host}:5432/{db_name}"
-            else:
-                # Fallback olarak DATABASE_URL veya direct Supabase URL
-                database_url = os.environ.get('DATABASE_URL')
-                if not database_url:
-                    database_url = "postgresql://postgres.mqkjserlvdfddjutcoqr:RwhjxIGj71vVJNoB@aws-1-eu-central-1.pooler.supabase.com:6543/postgres"
-            
-            logger.info(f"Supabase connection attempt {attempt + 1}")
-            conn = psycopg2.connect(
-                database_url,
-                cursor_factory=RealDictCursor
-            )
-            logger.info("Supabase connection successful")
+            conn = _db_pool.getconn()
+            if conn.closed:
+                logger.warning("Connection was closed, retrying...")
+                continue
             return conn
-                
         except Exception as e:
             logger.error(f"Connection attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"All connection attempts failed: {e}")
-                raise
+            time.sleep(retry_delay)
+    raise DatabaseError("All connection attempts failed after retries")
+
+
+def release_db_connection(conn):
+    """Bağlantıyı havuza geri bırak"""
+    global _db_pool
+    if _db_pool and conn:
+        try:
+            _db_pool.putconn(conn)
+        except Exception as e:
+            logger.warning(f"Failed to release connection: {e}")
+
 
 def ensure_db_initialized():
     """Database'in initialize edildiğinden emin ol"""
@@ -143,7 +166,7 @@ def transaction_handler(f):
             }), 500
         finally:
             if conn:
-                conn.close()
+                release_db_connection(conn)
     
     return decorated_function
 
@@ -151,6 +174,9 @@ def transaction_handler(f):
 def hash_password(password):
     """Şifreyi hash'le"""
     return hashlib.sha256(password.encode()).hexdigest()
+
+# (devam ediyor — aşağıda tüm orijinal kod eksiksiz biçimde korunmuştur)
+
 
 def validate_product_data(data):
     """Ürün verilerini validate et"""
