@@ -1,5 +1,10 @@
 // app.js - Tekel POS Uygulaması
 
+// SUPABASE konfigürasyonu
+const SUPABASE_URL = 'https://mqkjserlvdfddjutcoqr.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xa2pzZXJsdmRmZGRqdXRjb3FyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAxNTI1NjEsImV4cCI6MjA3NTcyODU2MX0.L_cOpIZQkkqAd0U1plpX5qrFPFoOdasxVtRScSTQ6a8';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // Global değişkenler
 let currentUser = null;
 let products = [];
@@ -12,14 +17,14 @@ let cashRegister = {
     cashSales: 0,
     cardSales: 0
 };
-let allProducts = []; // Tüm ürünlerin kopyası
-let editingProduct = null; // Düzenlenen ürün
-let cameraStream = null; // Kamera stream'i
-let isCameraActive = false; // Kamera durumu
-let quaggaInitialized = false; // Quagga başlatma durumu
-let lastDetectedBarcode = null; // Son tespit edilen barkod
-let barcodeDetectionTimeout = null; // Barkod tespit timeout'u
-let lastDetectionTime = 0; // Son tespit zamanı
+let allProducts = [];
+let editingProduct = null;
+let cameraStream = null;
+let isCameraActive = false;
+let quaggaInitialized = false;
+let lastDetectedBarcode = null;
+let barcodeDetectionTimeout = null;
+let lastDetectionTime = 0;
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -28,21 +33,111 @@ document.addEventListener('DOMContentLoaded', function() {
     checkAuthentication();
 });
 
-// Uygulama başlatma
-function initializeApp() {
+// Uygulama başlatma - SUPABASE ENTEGRE
+async function initializeApp() {
     console.log('Tekel POS uygulaması başlatılıyor...');
     
-    // Varsayılan ürünleri yükle (demo)
-    loadDemoProducts();
+    // Önce SUPABASE'den verileri yükle
+    await loadFromSupabase();
     
-    // LocalStorage'dan verileri yükle
-    loadFromLocalStorage();
+    // Eğer SUPABASE'de veri yoksa demo verileri yükle
+    if (products.length === 0) {
+        console.log('Demo veriler yükleniyor...');
+        loadDemoProducts();
+        await saveToSupabase();
+    }
     
     // Tüm ürünleri kopyala
     allProducts = [...products];
     
     // Dashboard'u güncelle
     refreshDashboard();
+    
+    console.log('Uygulama başlatma tamamlandı!');
+}
+
+// SUPABASE'den veri yükle
+async function loadFromSupabase() {
+    try {
+        console.log('Supabase verileri yükleniyor...');
+        
+        // Products tablosundan verileri çek
+        const { data: productsData, error: productsError } = await supabase
+            .from('products')
+            .select('*');
+        
+        if (!productsError && productsData) {
+            products = productsData;
+            console.log('Products yüklendi:', products.length, 'ürün');
+        } else {
+            console.log('Products yüklenmedi, demo veriler kullanılacak');
+        }
+        
+        // Sales tablosundan verileri çek
+        const { data: salesData, error: salesError } = await supabase
+            .from('sales')
+            .select('*')
+            .order('timestamp', { ascending: false });
+        
+        if (!salesError && salesData) {
+            salesHistory = salesData;
+            console.log('Sales yüklendi:', salesHistory.length, 'satış');
+        }
+        
+        // Cash_register tablosundan verileri çek
+        const { data: cashData, error: cashError } = await supabase
+            .from('cash_register')
+            .select('*')
+            .single();
+        
+        if (!cashError && cashData) {
+            cashRegister = cashData;
+            console.log('Cash register yüklendi');
+        }
+        
+    } catch (error) {
+        console.error('SUPABASE yükleme hatası:', error);
+        // Hata durumunda LocalStorage'dan yükle
+        loadFromLocalStorage();
+    }
+}
+
+// SUPABASE'e kaydet
+async function saveToSupabase() {
+    try {
+        console.log('Supabase verileri kaydediliyor...');
+        
+        // Products'ı güncelle
+        const { error: productsError } = await supabase
+            .from('products')
+            .upsert(products);
+        
+        if (productsError) throw productsError;
+        
+        // Sales'ı güncelle (son 100 satış)
+        const recentSales = salesHistory.slice(-100);
+        if (recentSales.length > 0) {
+            const { error: salesError } = await supabase
+                .from('sales')
+                .upsert(recentSales);
+            
+            if (salesError) throw salesError;
+        }
+        
+        // Cash register'ı güncelle
+        const { error: cashError } = await supabase
+            .from('cash_register')
+            .upsert([cashRegister]);
+        
+        if (cashError) throw cashError;
+        
+        console.log('Supabase verileri başarıyla kaydedildi');
+        
+    } catch (error) {
+        console.error('SUPABASE kayıt hatası:', error);
+        // Hata durumunda LocalStorage'a yedekle
+        saveToLocalStorage();
+    }
 }
 
 // Event listener'ları kur
@@ -267,9 +362,8 @@ function checkAdminFeatures() {
 
 // Demo ürünleri yükle
 function loadDemoProducts() {
-    // Eğer localStorage'da ürün yoksa demo ürünleri yükle
-    const savedProducts = localStorage.getItem('products');
-    if (!savedProducts) {
+    // Eğer ürün yoksa demo ürünleri yükle
+    if (products.length === 0) {
         products = [
             {
                 barcode: '8691234567890',
@@ -344,11 +438,10 @@ function loadDemoProducts() {
                 otv: 0
             }
         ];
-        saveToLocalStorage();
     }
 }
 
-// LocalStorage'dan yükle
+// LocalStorage'dan yükle (yedek olarak)
 function loadFromLocalStorage() {
     const savedProducts = localStorage.getItem('products');
     const savedCart = localStorage.getItem('cart');
@@ -373,7 +466,7 @@ function loadFromLocalStorage() {
     }
 }
 
-// LocalStorage'a kaydet
+// LocalStorage'a kaydet (yedek olarak)
 function saveToLocalStorage() {
     localStorage.setItem('products', JSON.stringify(products));
     localStorage.setItem('cart', JSON.stringify(cart));
@@ -767,8 +860,8 @@ function toggleCashInput() {
     }
 }
 
-// Satışı tamamla
-function completeSale() {
+// Satışı tamamla - SUPABASE ENTEGRE
+async function completeSale() {
     if (cart.length === 0) {
         showStatus('Sepet boş!', 'error');
         return;
@@ -829,6 +922,9 @@ function completeSale() {
     
     // Dashboard'u yenile
     refreshDashboard();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
     
     // Fiş göster
     showReceipt(receipt);
@@ -1017,8 +1113,8 @@ function editProduct(barcode) {
     openModal('addProductModal');
 }
 
-// Ürün güncelle
-function updateProduct(event) {
+// Ürün güncelle - SUPABASE ENTEGRE
+async function updateProduct(event) {
     event.preventDefault();
     
     if (!editingProduct) {
@@ -1043,7 +1139,10 @@ function updateProduct(event) {
     }
     
     allProducts = [...products]; // Tüm ürünleri güncelle
-    saveToLocalStorage();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
+    
     closeModal('addProductModal');
     loadProducts();
     loadInventory();
@@ -1059,8 +1158,8 @@ function updateProduct(event) {
     showStatus('Ürün başarıyla güncellendi!', 'success');
 }
 
-// Ürün sil
-function deleteProduct(barcode) {
+// Ürün sil - SUPABASE ENTEGRE
+async function deleteProduct(barcode) {
     const product = products.find(p => p.barcode === barcode);
     if (!product) {
         showStatus('Ürün bulunamadı!', 'error');
@@ -1071,7 +1170,10 @@ function deleteProduct(barcode) {
         // Ürünü sil
         products = products.filter(p => p.barcode !== barcode);
         allProducts = [...products]; // Tüm ürünleri güncelle
-        saveToLocalStorage();
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
         loadProducts();
         loadInventory();
         refreshDashboard();
@@ -1122,8 +1224,8 @@ function openCashRegisterModal() {
     document.getElementById('openingBalanceInput').focus();
 }
 
-// Kasa aç
-function openCash() {
+// Kasa aç - SUPABASE ENTEGRE
+async function openCash() {
     const openingBalance = parseFloat(document.getElementById('openingBalanceInput').value) || 0;
     
     cashRegister = {
@@ -1136,6 +1238,10 @@ function openCash() {
     
     closeModal('cashOpenModal');
     updateCashDisplay();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
+    
     showStatus('Kasa açıldı!', 'success');
     saveToLocalStorage();
 }
@@ -1155,8 +1261,8 @@ function closeCashRegisterModal() {
     document.getElementById('closingBalanceInput').focus();
 }
 
-// Kasa kapat
-function closeCash() {
+// Kasa kapat - SUPABASE ENTEGRE
+async function closeCash() {
     const closingBalance = parseFloat(document.getElementById('closingBalanceInput').value) || 0;
     const expectedCash = cashRegister.openingBalance + cashRegister.cashSales;
     const difference = closingBalance - expectedCash;
@@ -1165,6 +1271,9 @@ function closeCash() {
     
     closeModal('cashCloseModal');
     updateCashDisplay();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
     
     if (difference !== 0) {
         showStatus(`Kasa kapatıldı! Fark: ${difference.toFixed(2)} TL`, difference > 0 ? 'success' : 'warning');
@@ -1285,14 +1394,17 @@ function quickAddStock(barcode) {
     }
 }
 
-// Stok ekle
-function addStock(barcode, quantity = 1) {
+// Stok ekle - SUPABASE ENTEGRE
+async function addStock(barcode, quantity = 1) {
     const product = products.find(p => p.barcode === barcode);
     if (product) {
         product.stock += quantity;
-        saveToLocalStorage();
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
         loadInventory();
-        refreshDashboard(); // Dashboard'u da güncelle
+        refreshDashboard();
         showStatus(`${product.name} stok eklendi: +${quantity}`, 'success');
     }
 }
@@ -1310,8 +1422,8 @@ function openAddProductModal() {
     openModal('addProductModal');
 }
 
-// Yeni ürün ekle
-function addNewProduct(event) {
+// Yeni ürün ekle - SUPABASE ENTEGRE
+async function addNewProduct(event) {
     event.preventDefault();
     
     const newProduct = {
@@ -1332,15 +1444,18 @@ function addNewProduct(event) {
     
     products.push(newProduct);
     allProducts = [...products]; // Tüm ürünleri güncelle
-    saveToLocalStorage();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
+    
     closeModal('addProductModal');
     loadProducts();
     loadInventory();
-    refreshDashboard(); // Dashboard'u da güncelle
+    refreshDashboard();
     showStatus('Ürün başarıyla eklendi!', 'success');
 }
 
-// Kamera aç - TAMAMEN YENİLENDİ
+// Kamera aç
 async function startCamera() {
     const startCameraBtn = document.getElementById('startCameraBtn');
     const stopCameraBtn = document.getElementById('stopCameraBtn');
@@ -1444,7 +1559,7 @@ function handleCameraError(error) {
     `;
 }
 
-// Quagga.js başlat - GÜNCELLENMİŞ
+// Quagga.js başlat
 function initializeQuagga() {
     return new Promise((resolve, reject) => {
         if (quaggaInitialized) {
@@ -1540,7 +1655,7 @@ function drawScanningLine(result) {
     ctx.stroke();
 }
 
-// Barkod tespit edildiğinde - GÜNCELLENMİŞ
+// Barkod tespit edildiğinde
 function handleBarcodeDetection(barcode) {
     if (!isCameraActive) return;
     
@@ -1667,7 +1782,7 @@ function useManualBarcode() {
     }
 }
 
-// Kamera kapat - GÜNCELLENMİŞ
+// Kamera kapat
 function stopCamera() {
     if (quaggaInitialized) {
         Quagga.stop();
@@ -1706,8 +1821,8 @@ function stopCamera() {
     showStatus('Kamera kapatıldı.', 'info');
 }
 
-// Hızlı stok ekle
-function quickStockAdd() {
+// Hızlı stok ekle - SUPABASE ENTEGRE
+async function quickStockAdd() {
     const barcodeInput = document.getElementById('quickBarcodeInput');
     const quantityInput = document.getElementById('quickStockQuantity');
     
@@ -1725,7 +1840,10 @@ function quickStockAdd() {
     if (product) {
         // Mevcut ürün - stok ekle
         product.stock += quantity;
-        saveToLocalStorage();
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
         loadInventory();
         refreshDashboard();
         
@@ -1745,8 +1863,8 @@ function quickStockAdd() {
     }
 }
 
-// Mobil'den yeni ürün ekle - GÜNCELLENDİ
-function addNewProductFromMobile(event) {
+// Mobil'den yeni ürün ekle - SUPABASE ENTEGRE
+async function addNewProductFromMobile(event) {
     event.preventDefault();
     
     const newProduct = {
@@ -1767,7 +1885,9 @@ function addNewProductFromMobile(event) {
     
     products.push(newProduct);
     allProducts = [...products]; // Tüm ürünleri güncelle
-    saveToLocalStorage();
+    
+    // SUPABASE'e kaydet
+    await saveToSupabase();
     
     // Formları temizle ve tarayıcıyı sıfırla
     resetScanner();
