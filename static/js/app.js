@@ -19,6 +19,7 @@ let isCameraActive = false; // Kamera durumu
 let quaggaInitialized = false; // Quagga başlatma durumu
 let lastDetectedBarcode = null; // Son tespit edilen barkod
 let barcodeDetectionTimeout = null; // Barkod tespit timeout'u
+let lastDetectionTime = 0; // Son tespit zamanı
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -1345,17 +1346,32 @@ async function startCamera() {
     const stopCameraBtn = document.getElementById('stopCameraBtn');
     const cameraPreview = document.getElementById('cameraPreview');
     const scanResult = document.getElementById('scanResult');
-    const videoElement = document.getElementById('videoElement');
     
     try {
-        // Önce kamerayı temizle
+        // Önce mevcut kamerayı temizle
         stopCamera();
         
-        // Quagga.js ile barkod taramayı başlat
-        await initializeQuagga();
+        // Kamera izinlerini kontrol et
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment', // Arka kamera
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
+        });
+        
+        cameraStream = stream;
+        const videoElement = document.getElementById('videoElement');
+        videoElement.srcObject = stream;
+        
+        // Video yüklendikten sonra Quagga'yı başlat
+        videoElement.onloadedmetadata = function() {
+            initializeQuagga();
+        };
         
         isCameraActive = true;
-        lastDetectedBarcode = null; // Reset barcode detection
+        lastDetectedBarcode = null;
+        lastDetectionTime = 0;
         
         // UI güncelleme
         startCameraBtn.style.display = 'none';
@@ -1366,7 +1382,7 @@ async function startCamera() {
                 <i class="fas fa-camera"></i>
                 <p>Kamera açıldı. Barkodu kameraya gösterin...</p>
                 <div class="scanning-animation"></div>
-                <p class="scanning-hint">Barkod okunduktan sonra otomatik olarak form doldurulacak</p>
+                <p class="scanning-hint">Barkod kameranın odak noktasına getirin</p>
             </div>
         `;
         
@@ -1374,48 +1390,67 @@ async function startCamera() {
         
     } catch (error) {
         console.error('Kamera açılamadı:', error);
-        showStatus('Kamera açılamadı! Demo moda geçiliyor.', 'error');
-        
-        // Demo modda çalış (kamera olmadan)
-        startCameraBtn.style.display = 'none';
-        stopCameraBtn.style.display = 'inline-block';
-        cameraPreview.style.display = 'block';
-        scanResult.innerHTML = `
-            <div class="demo-scanning">
-                <i class="fas fa-mobile-alt"></i>
-                <p>Demo Mod: Manuel barkod girişi</p>
-                <div class="demo-barcodes">
-                    <p>Örnek barkodlar:</p>
-                    <div class="barcode-list">
-                        <span class="barcode-option" onclick="setBarcodeInput('8691234567890')">
-                            <i class="fas fa-barcode"></i> 8691234567890 - Marlboro Red
-                        </span>
-                        <span class="barcode-option" onclick="setBarcodeInput('8691234567891')">
-                            <i class="fas fa-barcode"></i> 8691234567891 - Marlboro Gold
-                        </span>
-                        <span class="barcode-option" onclick="setBarcodeInput('8691234567892')">
-                            <i class="fas fa-barcode"></i> 8691234567892 - Camel Yellow
-                        </span>
-                    </div>
-                </div>
-                <div class="manual-input">
-                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin" class="form-input">
-                    <button class="btn-primary" onclick="useManualBarcode()">
-                        <i class="fas fa-check"></i> Kullan
-                    </button>
-                </div>
-            </div>
-        `;
+        handleCameraError(error);
     }
 }
 
-// Quagga.js başlat - GÜNCELLENDİ
+// Kamera hata yönetimi
+function handleCameraError(error) {
+    const startCameraBtn = document.getElementById('startCameraBtn');
+    const stopCameraBtn = document.getElementById('stopCameraBtn');
+    const cameraPreview = document.getElementById('cameraPreview');
+    const scanResult = document.getElementById('scanResult');
+    
+    showStatus('Kamera açılamadı! Demo moda geçiliyor.', 'error');
+    
+    // Demo mod
+    startCameraBtn.style.display = 'none';
+    stopCameraBtn.style.display = 'inline-block';
+    cameraPreview.style.display = 'block';
+    scanResult.innerHTML = `
+        <div class="demo-scanning">
+            <i class="fas fa-mobile-alt"></i>
+            <h3>Demo Mod Aktif</h3>
+            <p>Kamera erişimi sağlanamadı. Manuel barkod girişi yapabilirsiniz.</p>
+            
+            <div class="demo-barcodes">
+                <p><strong>Örnek barkodlar:</strong></p>
+                <div class="barcode-list">
+                    <div class="barcode-option" onclick="setBarcodeInput('8691234567890')">
+                        <i class="fas fa-barcode"></i> 8691234567890 - Marlboro Red
+                    </div>
+                    <div class="barcode-option" onclick="setBarcodeInput('8691234567891')">
+                        <i class="fas fa-barcode"></i> 8691234567891 - Marlboro Gold
+                    </div>
+                    <div class="barcode-option" onclick="setBarcodeInput('8691234567892')">
+                        <i class="fas fa-barcode"></i> 8691234567892 - Camel Yellow
+                    </div>
+                    <div class="barcode-option" onclick="setBarcodeInput('8691234567893')">
+                        <i class="fas fa-barcode"></i> 8691234567893 - Winston Blue
+                    </div>
+                </div>
+            </div>
+            
+            <div class="manual-input-section">
+                <h4>Manuel Barkod Girişi</h4>
+                <div class="input-group">
+                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin" class="form-input">
+                    <button class="btn-primary" onclick="useManualBarcode()">
+                        <i class="fas fa-check"></i> Tara
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Quagga.js başlat - GÜNCELLENMİŞ
 function initializeQuagga() {
     return new Promise((resolve, reject) => {
         if (quaggaInitialized) {
-            Quagga.start();
-            resolve();
-            return;
+            console.log('Quagga zaten başlatılmış, yeniden başlatılıyor...');
+            Quagga.stop();
+            quaggaInitialized = false;
         }
 
         Quagga.init({
@@ -1426,7 +1461,13 @@ function initializeQuagga() {
                 constraints: {
                     width: 640,
                     height: 480,
-                    facingMode: "environment" // Arka kamera
+                    facingMode: "environment"
+                },
+                area: {
+                    top: "0%",
+                    right: "0%",
+                    left: "0%",
+                    bottom: "0%"
                 }
             },
             decoder: {
@@ -1437,14 +1478,15 @@ function initializeQuagga() {
                     "code_39_reader",
                     "upc_reader",
                     "upc_e_reader"
-                ]
+                ],
+                multiple: false
             },
             locator: {
                 patchSize: "medium",
                 halfSample: true
             },
             locate: true,
-            numOfWorkers: 2
+            numOfWorkers: navigator.hardwareConcurrency || 2
         }, function(err) {
             if (err) {
                 console.error("Quagga başlatılamadı:", err);
@@ -1460,7 +1502,18 @@ function initializeQuagga() {
                 if (result.codeResult && result.codeResult.code) {
                     const detectedBarcode = result.codeResult.code;
                     console.log("Barkod tespit edildi:", detectedBarcode);
-                    handleBarcodeDetection(detectedBarcode);
+                    
+                    // Geçersiz barkodları filtrele
+                    if (detectedBarcode.length >= 8) {
+                        handleBarcodeDetection(detectedBarcode);
+                    }
+                }
+            });
+            
+            // Tarama durumunu izle
+            Quagga.onProcessed(function(result) {
+                if (result) {
+                    drawScanningLine(result);
                 }
             });
             
@@ -1470,14 +1523,35 @@ function initializeQuagga() {
     });
 }
 
-// Barkod tespit edildiğinde - GÜNCELLENDİ
+// Tarama çizgisi çiz (görsel feedback)
+function drawScanningLine(result) {
+    const canvas = document.querySelector('canvas.drawingBuffer');
+    if (!canvas || !result.box) return;
+    
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Tarama çizgisi çiz
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height / 2);
+    ctx.lineTo(canvas.width, canvas.height / 2);
+    ctx.stroke();
+}
+
+// Barkod tespit edildiğinde - GÜNCELLENMİŞ
 function handleBarcodeDetection(barcode) {
     if (!isCameraActive) return;
     
-    // Aynı barkodun tekrar tekrar işlenmesini önle (3 saniye timeout)
-    if (lastDetectedBarcode === barcode) return;
+    // Aynı barkodun tekrar tekrar işlenmesini önle
+    const now = Date.now();
+    if (lastDetectedBarcode === barcode && now - lastDetectionTime < 3000) {
+        return;
+    }
     
     lastDetectedBarcode = barcode;
+    lastDetectionTime = now;
     
     // Timeout'u temizle ve yeniden başlat
     if (barcodeDetectionTimeout) {
@@ -1490,30 +1564,56 @@ function handleBarcodeDetection(barcode) {
     
     const scanResult = document.getElementById('scanResult');
     
-    // Barkodu text input'una yaz
+    // Barkodu input alanlarına yaz
     document.getElementById('quickBarcodeInput').value = barcode;
     document.getElementById('barcodeFieldMobile').value = barcode;
     document.getElementById('scannedBarcodeMobile').value = barcode;
     
-    // Tarama sonucunu göster
-    scanResult.innerHTML = `
-        <div class="scan-success">
-            <i class="fas fa-check-circle"></i>
-            <p>Barkod başarıyla okundu!</p>
-            <div class="scanned-barcode">
-                <strong>Barkod:</strong> ${barcode}
+    // Ürünü otomatik olarak kontrol et
+    const product = products.find(p => p.barcode === barcode);
+    
+    if (product) {
+        // Ürün bulundu - otomatik stok ekle
+        scanResult.innerHTML = `
+            <div class="scan-success">
+                <i class="fas fa-check-circle"></i>
+                <h3>Ürün Bulundu!</h3>
+                <div class="product-info">
+                    <strong>${product.name}</strong>
+                    <p>Barkod: ${barcode}</p>
+                    <p>Mevcut Stok: ${product.stock}</p>
+                </div>
+                <div class="scan-actions">
+                    <button class="btn-success" onclick="quickStockAdd()">
+                        <i class="fas fa-plus"></i> Hızlı Stok Ekle
+                    </button>
+                    <button class="btn-primary" onclick="resetScanner()">
+                        <i class="fas fa-redo"></i> Yeni Barkod Tara
+                    </button>
+                </div>
             </div>
-            <div class="scan-actions">
-                <button class="btn-success" onclick="quickStockAdd()">
-                    <i class="fas fa-plus"></i> Hızlı Stok Ekle
-                </button>
-                <button class="btn-primary" onclick="resetScanner()">
-                    <i class="fas fa-redo"></i> Yeni Barkod Tara
-                </button>
+        `;
+    } else {
+        // Ürün bulunamadı - yeni ürün formu göster
+        scanResult.innerHTML = `
+            <div class="scan-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Ürün Bulunamadı</h3>
+                <div class="product-info">
+                    <p>Barkod: ${barcode}</p>
+                    <p>Bu barkoda sahip ürün bulunamadı. Yeni ürün ekleyin.</p>
+                </div>
+                <div class="scan-actions">
+                    <button class="btn-primary" onclick="showNewProductForm()">
+                        <i class="fas fa-plus-circle"></i> Yeni Ürün Ekle
+                    </button>
+                    <button class="btn-secondary" onclick="resetScanner()">
+                        <i class="fas fa-redo"></i> Yeni Barkod Tara
+                    </button>
+                </div>
             </div>
-            <p class="scan-hint">Yeni barkod taramak için "Yeni Barkod Tara" butonuna tıklayın</p>
-        </div>
-    `;
+        `;
+    }
     
     // Manuel ürün formunu göster
     document.getElementById('manualProductForm').style.display = 'block';
@@ -1521,9 +1621,16 @@ function handleBarcodeDetection(barcode) {
     showStatus(`Barkod okundu: ${barcode}`, 'success');
 }
 
-// Tarayıcıyı sıfırla - YENİ EKLENDİ
+// Yeni ürün formunu göster
+function showNewProductForm() {
+    document.getElementById('manualProductForm').style.display = 'block';
+    document.getElementById('productNameMobile').focus();
+}
+
+// Tarayıcıyı sıfırla
 function resetScanner() {
     lastDetectedBarcode = null;
+    lastDetectionTime = 0;
     
     const scanResult = document.getElementById('scanResult');
     scanResult.innerHTML = `
@@ -1560,7 +1667,7 @@ function useManualBarcode() {
     }
 }
 
-// Kamera kapat - GÜNCELLENDİ
+// Kamera kapat - GÜNCELLENMİŞ
 function stopCamera() {
     if (quaggaInitialized) {
         Quagga.stop();
@@ -1574,6 +1681,7 @@ function stopCamera() {
     
     isCameraActive = false;
     lastDetectedBarcode = null;
+    lastDetectionTime = 0;
     
     if (barcodeDetectionTimeout) {
         clearTimeout(barcodeDetectionTimeout);
