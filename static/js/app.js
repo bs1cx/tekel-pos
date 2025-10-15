@@ -50,9 +50,6 @@ async function initializeApp() {
     // Tüm ürünleri kopyala
     allProducts = [...products];
     
-    // Dashboard'u güncelle
-    refreshDashboard();
-    
     console.log('Uygulama başlatma tamamlandı!');
 }
 
@@ -247,7 +244,7 @@ function showLogin() {
     document.querySelector('.app-container').style.display = 'none';
 }
 
-// Uygulama ekranını göster
+// Uygulama ekranını göster - DÜZELTİLDİ
 function showApp() {
     document.getElementById('loginModal').style.display = 'none';
     document.querySelector('.app-container').style.display = 'flex';
@@ -259,7 +256,7 @@ function showApp() {
     // Admin özelliklerini kontrol et
     checkAdminFeatures();
     
-    // Dashboard'u yenile
+    // SADECE dashboard'u yenile, initializeApp'i çağırma!
     refreshDashboard();
 }
 
@@ -360,10 +357,11 @@ function checkAdminFeatures() {
     });
 }
 
-// Demo ürünleri yükle
+// Demo ürünleri yükle - DÜZELTİLDİ
 function loadDemoProducts() {
-    // Eğer ürün yoksa demo ürünleri yükle
-    if (products.length === 0) {
+    // Sadece gerçekten boşsa demo verileri yükle
+    if (!products || products.length === 0) {
+        console.log('Demo ürünler yükleniyor...');
         products = [
             {
                 barcode: '8691234567890',
@@ -438,6 +436,7 @@ function loadDemoProducts() {
                 otv: 0
             }
         ];
+        console.log('Demo ürünler yüklendi:', products.length, 'ürün');
     }
 }
 
