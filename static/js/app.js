@@ -1,4 +1,4 @@
-// app.js - Tekel POS Uygulaması
+// app.js - Tekel POS Uygulaması (Real-time entegre edilmiş)
 
 // SUPABASE konfigürasyonu
 const SUPABASE_URL = 'https://mqkjserlvdfddjutcoqr.supabase.co';
@@ -26,6 +26,10 @@ let lastDetectedBarcode = null;
 let barcodeDetectionTimeout = null;
 let lastDetectionTime = 0;
 let appInitialized = false; // Uygulamanın başlatılıp başlatılmadığını takip etmek için
+
+// Real-time yönetimi değişkenleri
+let realtimeChannels = [];
+let realtimeDebounceTimer = null;
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
@@ -59,6 +63,9 @@ async function initializeApp() {
         
         appInitialized = true;
         console.log('Uygulama başlatma tamamlandı!');
+        
+        // Gerçek zamanlı dinleyicileri başlat
+        setupRealtimeListeners();
     } catch (error) {
         console.error('Uygulama başlatma hatası:', error);
         showStatus('Uygulama başlatılırken hata oluştu!', 'error');
@@ -300,6 +307,10 @@ function logout() {
     localStorage.removeItem('currentUser');
     cart = [];
     appInitialized = false; // Uygulama durumunu sıfırla
+    
+    // Real-time dinleyicileri sonlandır
+    teardownRealtimeListeners();
+    
     showLogin();
     showStatus('Çıkış yapıldı.', 'info');
 }
@@ -2085,6 +2096,8 @@ window.addEventListener('beforeunload', function() {
     saveToLocalStorage();
     // Kamerayı kapat
     stopCamera();
+    // Real-time bağlantılarını kapat
+    teardownRealtimeListeners();
 });
 
 // Hata yönetimi
@@ -2092,3 +2105,85 @@ window.addEventListener('error', function(e) {
     console.error('Uygulama hatası:', e.error);
     showStatus('Bir hata oluştu!', 'error');
 });
+
+/* ============================
+   SUPABASE REAL-TIME BÖLÜMÜ
+   ============================ */
+
+// Real-time dinleyicileri başlatır
+function setupRealtimeListeners() {
+    try {
+        console.log("🔄 Supabase real-time dinleyiciler başlatılıyor...");
+        const tables = ['products', 'sales', 'cash_register'];
+
+        // Eğer daha önce oluşturulmuş kanallar varsa önce kapat
+        if (realtimeChannels.length > 0) {
+            realtimeChannels.forEach(ch => {
+                try {
+                    ch.unsubscribe && ch.unsubscribe();
+                } catch (e) {}
+                try {
+                    supabase.removeChannel && supabase.removeChannel(ch);
+                } catch (e) {}
+            });
+            realtimeChannels = [];
+        }
+
+        tables.forEach(table => {
+            const channel = supabase
+                .channel(`realtime:${table}`)
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: table },
+                    (payload) => {
+                        console.log(`📡 ${table} tablosunda değişiklik algılandı:`, payload.eventType, payload);
+
+                        // Debounce: 2 saniye içinde birden fazla tetiklenirse sadece 1 kez yenile
+                        if (realtimeDebounceTimer) {
+                            clearTimeout(realtimeDebounceTimer);
+                        }
+                        realtimeDebounceTimer = setTimeout(async () => {
+                            console.log("🔁 Supabase verileri yeniden yükleniyor (realtime tetikleme)...");
+                            await loadFromSupabase();
+                            refreshDashboard();
+                        }, 2000);
+                    }
+                )
+                .subscribe((status) => {
+                    console.log(`✅ Real-time abonelik durumu (${table}):`, status);
+                });
+
+            realtimeChannels.push(channel);
+        });
+    } catch (err) {
+        console.error('Real-time başlatılırken hata:', err);
+    }
+}
+
+// Real-time dinleyicileri sonlandırır
+function teardownRealtimeListeners() {
+    try {
+        if (realtimeChannels && realtimeChannels.length > 0) {
+            realtimeChannels.forEach(ch => {
+                try {
+                    ch.unsubscribe && ch.unsubscribe();
+                } catch (err) {}
+                try {
+                    supabase.removeChannel && supabase.removeChannel(ch);
+                } catch (err) {}
+            });
+            realtimeChannels = [];
+            console.log('🔕 Real-time dinleyiciler sonlandırıldı.');
+        }
+        if (realtimeDebounceTimer) {
+            clearTimeout(realtimeDebounceTimer);
+            realtimeDebounceTimer = null;
+        }
+    } catch (err) {
+        console.error('Real-time kapatılırken hata:', err);
+    }
+}
+
+/* ============================
+   END OF FILE
+   ============================ */
