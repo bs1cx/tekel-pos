@@ -6,6 +6,7 @@
     <title>Tekel POS - Profesyonel Satış Sistemi</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
     <!-- Login Modal -->
@@ -120,12 +121,12 @@
                     <div class="connection-info">
                         <div class="ip-display">
                             <i class="fas fa-wifi"></i>
-                            <span>IP: <span id="localIP">{{ local_ip }}</span></span>
+                            <span>IP: <span id="localIP">Yükleniyor...</span></span>
                         </div>
                         <div class="qr-display">
-                            <img id="qrCodeImage" src="{{ qr_code }}" alt="QR Code">
-                            <div class="qr-tooltip">
-                                <p>Sisteme bağlanmak için QR kodu tarayın</p>
+                            <div class="qr-placeholder">
+                                <i class="fas fa-qrcode"></i>
+                                <p>QR Kod</p>
                             </div>
                         </div>
                     </div>
@@ -793,7 +794,7 @@
     </div>
 
     <!-- Modals -->
-    <div id="cashOpenModal" class="modal">
+    <div id="cashOpenModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-lock-open"></i> Kasa Aç</h3>
@@ -812,7 +813,7 @@
         </div>
     </div>
 
-    <div id="cashCloseModal" class="modal">
+    <div id="cashCloseModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-lock"></i> Kasa Kapat</h3>
@@ -850,7 +851,7 @@
     </div>
 
     <!-- Add Product Modal -->
-    <div id="addProductModal" class="modal">
+    <div id="addProductModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-plus-circle"></i> Yeni Ürün Ekle</h3>
@@ -900,7 +901,7 @@
     </div>
 
     <!-- Add User Modal -->
-    <div id="addUserModal" class="modal">
+    <div id="addUserModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-user-plus"></i> Yeni Kullanıcı Ekle</h3>
@@ -942,7 +943,7 @@
     </div>
 
     <!-- Receipt Modal -->
-    <div id="receiptModal" class="modal">
+    <div id="receiptModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
                 <h3><i class="fas fa-receipt"></i> Fiş Görüntüleme</h3>
@@ -964,8 +965,6 @@
     <div id="statusMessage" class="status-message" style="display: none;"></div>
 
     <!-- Scripts -->
-    <script src="/static/js/debug.js"></script>
-    <script src="/static/js/jsQR.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
