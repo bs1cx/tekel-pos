@@ -25,32 +25,44 @@ let quaggaInitialized = false;
 let lastDetectedBarcode = null;
 let barcodeDetectionTimeout = null;
 let lastDetectionTime = 0;
+let appInitialized = false; // Uygulamanın başlatılıp başlatılmadığını takip etmek için
 
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
+    console.log('DOM yüklendi, uygulama başlatılıyor...');
     setupEventListeners();
     checkAuthentication();
 });
 
 // Uygulama başlatma - SUPABASE ENTEGRE
 async function initializeApp() {
-    console.log('Tekel POS uygulaması başlatılıyor...');
-    
-    // Önce SUPABASE'den verileri yükle
-    await loadFromSupabase();
-    
-    // Eğer SUPABASE'de veri yoksa demo verileri yükle
-    if (products.length === 0) {
-        console.log('Demo veriler yükleniyor...');
-        loadDemoProducts();
-        await saveToSupabase();
+    if (appInitialized) {
+        console.log('Uygulama zaten başlatılmış, tekrar başlatılmıyor.');
+        return;
     }
     
-    // Tüm ürünleri kopyala
-    allProducts = [...products];
+    console.log('Tekel POS uygulaması başlatılıyor...');
     
-    console.log('Uygulama başlatma tamamlandı!');
+    try {
+        // Önce SUPABASE'den verileri yükle
+        await loadFromSupabase();
+        
+        // Eğer SUPABASE'de veri yoksa demo verileri yükle
+        if (products.length === 0) {
+            console.log('Demo veriler yükleniyor...');
+            loadDemoProducts();
+            await saveToSupabase();
+        }
+        
+        // Tüm ürünleri kopyala
+        allProducts = [...products];
+        
+        appInitialized = true;
+        console.log('Uygulama başlatma tamamlandı!');
+    } catch (error) {
+        console.error('Uygulama başlatma hatası:', error);
+        showStatus('Uygulama başlatılırken hata oluştu!', 'error');
+    }
 }
 
 // SUPABASE'den veri yükle
@@ -139,6 +151,8 @@ async function saveToSupabase() {
 
 // Event listener'ları kur
 function setupEventListeners() {
+    console.log('Event listenerlar kuruluyor...');
+    
     // Login formu
     const loginForm = document.getElementById('loginForm');
     if (loginForm) {
@@ -202,25 +216,33 @@ function setupEventListeners() {
             openAdminTab(tabName);
         });
     });
+    
+    console.log('Event listenerlar başarıyla kuruldu.');
 }
 
 // Kimlik doğrulama kontrolü
 function checkAuthentication() {
+    console.log('Kimlik doğrulama kontrol ediliyor...');
     const savedUser = localStorage.getItem('currentUser');
     if (savedUser) {
         currentUser = JSON.parse(savedUser);
+        console.log('Kullanıcı bulundu:', currentUser.username);
         showApp();
     } else {
+        console.log('Kullanıcı bulunamadı, login ekranı gösteriliyor.');
         showLogin();
     }
 }
 
 // Login işlemi
-function handleLogin(event) {
+async function handleLogin(event) {
     event.preventDefault();
+    console.log('Login işlemi başlatılıyor...');
     
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
+    
+    console.log('Kullanıcı adı:', username);
     
     // Basit login kontrolü (gerçek uygulamada sunucu tarafında doğrulama yapılmalı)
     if (username === 'admin' && password === 'admin123') {
@@ -231,21 +253,30 @@ function handleLogin(event) {
         };
         
         localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        console.log('Login başarılı, uygulama gösteriliyor...');
+        
+        // Uygulamayı başlat ve göster
+        await initializeApp();
         showApp();
         showStatus('Başarıyla giriş yapıldı!', 'success');
     } else {
+        console.log('Geçersiz giriş denemesi');
         showStatus('Geçersiz kullanıcı adı veya şifre!', 'error');
     }
 }
 
 // Login ekranını göster
 function showLogin() {
+    console.log('Login ekranı gösteriliyor...');
     document.getElementById('loginModal').style.display = 'block';
     document.querySelector('.app-container').style.display = 'none';
 }
 
 // Uygulama ekranını göster - DÜZELTİLDİ
 function showApp() {
+    console.log('Uygulama ekranı gösteriliyor...');
+    
+    // Önce ekranları doğru şekilde ayarla
     document.getElementById('loginModal').style.display = 'none';
     document.querySelector('.app-container').style.display = 'flex';
     
@@ -256,21 +287,27 @@ function showApp() {
     // Admin özelliklerini kontrol et
     checkAdminFeatures();
     
-    // SADECE dashboard'u yenile, initializeApp'i çağırma!
+    // Dashboard'u yenile
     refreshDashboard();
+    
+    console.log('Uygulama ekranı başarıyla gösterildi.');
 }
 
 // Çıkış yap
 function logout() {
+    console.log('Çıkış yapılıyor...');
     currentUser = null;
     localStorage.removeItem('currentUser');
     cart = [];
+    appInitialized = false; // Uygulama durumunu sıfırla
     showLogin();
     showStatus('Çıkış yapıldı.', 'info');
 }
 
 // Sekme değiştirme
 function switchTab(tabName) {
+    console.log('Sekme değiştiriliyor:', tabName);
+    
     // Tüm tab içeriklerini gizle
     const tabContents = document.querySelectorAll('.tab-content');
     tabContents.forEach(tab => {
@@ -328,6 +365,8 @@ function switchTab(tabName) {
             loadAdminData();
             break;
     }
+    
+    console.log('Sekme başarıyla değiştirildi:', tabName);
 }
 
 // Breadcrumb güncelleme
@@ -442,6 +481,8 @@ function loadDemoProducts() {
 
 // LocalStorage'dan yükle (yedek olarak)
 function loadFromLocalStorage() {
+    console.log('LocalStorage verileri yükleniyor...');
+    
     const savedProducts = localStorage.getItem('products');
     const savedCart = localStorage.getItem('cart');
     const savedCashRegister = localStorage.getItem('cashRegister');
@@ -449,19 +490,23 @@ function loadFromLocalStorage() {
     
     if (savedProducts) {
         products = JSON.parse(savedProducts);
+        console.log('LocalStorage products yüklendi:', products.length, 'ürün');
     }
     
     if (savedCart) {
         cart = JSON.parse(savedCart);
         updateCartDisplay();
+        console.log('LocalStorage cart yüklendi:', cart.length, 'ürün');
     }
     
     if (savedCashRegister) {
         cashRegister = JSON.parse(savedCashRegister);
+        console.log('LocalStorage cashRegister yüklendi');
     }
     
     if (savedSalesHistory) {
         salesHistory = JSON.parse(savedSalesHistory);
+        console.log('LocalStorage salesHistory yüklendi:', salesHistory.length, 'satış');
     }
 }
 
