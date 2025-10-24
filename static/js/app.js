@@ -1,4 +1,4 @@
-// app.js - Tekel POS Uygulaması (Tam Sürüm)
+// app.js - Tekel POS Uygulaması (Tam Sürüm - Güncellendi)
 
 // SUPABASE konfigürasyonu
 const SUPABASE_URL = 'https://mqkjserlvdfddjutcoqr.supabase.co';
@@ -10,6 +10,8 @@ let currentUser = null;
 let products = [];
 let cart = [];
 let salesHistory = [];
+let users = [];
+let auditLogs = [];
 let cashRegister = {
     isOpen: false,
     openingBalance: 0,
@@ -23,6 +25,7 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM yüklendi, uygulama başlatılıyor...');
     setupEventListeners();
     checkAuthentication();
+    getLocalIP();
 });
 
 // Event listener'ları kur
@@ -104,18 +107,6 @@ function setupModalEventListeners() {
         addProductForm.addEventListener('submit', addNewProduct);
     }
     
-    // Ürün düzenleme
-    const updateProductBtn = document.getElementById('updateProductBtn');
-    if (updateProductBtn) {
-        updateProductBtn.addEventListener('click', updateProduct);
-    }
-    
-    // Fiş yazdırma
-    const printReceiptBtn = document.getElementById('printReceiptBtn');
-    if (printReceiptBtn) {
-        printReceiptBtn.addEventListener('click', printReceipt);
-    }
-    
     // Modal kapatma butonları
     const modalCloseBtns = document.querySelectorAll('.modal-close, .btn-cancel');
     modalCloseBtns.forEach(btn => {
@@ -189,6 +180,11 @@ async function initializeApp() {
         if (products.length === 0) {
             loadDemoProducts();
             await saveToSupabase();
+        }
+        
+        // Demo kullanıcılar
+        if (users.length === 0) {
+            loadDemoUsers();
         }
         
         console.log('Uygulama başlatma tamamlandı');
@@ -289,6 +285,9 @@ function switchTab(tabName) {
         case 'cash':
             loadCashStatus();
             break;
+        case 'admin':
+            loadAdminData();
+            break;
     }
 }
 
@@ -301,7 +300,8 @@ function updateBreadcrumb(tabName) {
         'products': 'Ürünler',
         'inventory': 'Stok Yönetimi',
         'reports': 'Raporlar',
-        'cash': 'Kasa'
+        'cash': 'Kasa',
+        'admin': 'Yönetim'
     };
     
     if (breadcrumb) {
@@ -326,6 +326,17 @@ function loadDemoProducts() {
     }
 }
 
+// Demo kullanıcıları yükle
+function loadDemoUsers() {
+    if (users.length === 0) {
+        users = [
+            { username: 'admin', fullName: 'Sistem Yöneticisi', role: 'admin', lastLogin: new Date().toISOString() },
+            { username: 'kasiyer1', fullName: 'Ahmet Yılmaz', role: 'cashier', lastLogin: new Date().toISOString() },
+            { username: 'kasiyer2', fullName: 'Ayşe Demir', role: 'cashier', lastLogin: new Date().toISOString() }
+        ];
+    }
+}
+
 // SUPABASE'den veri yükle
 async function loadFromSupabase() {
     try {
@@ -338,7 +349,7 @@ async function loadFromSupabase() {
 
         if (productsError) {
             console.error('Products yüklenirken hata:', productsError);
-        } else if (productsData) {
+        } else if (productsData && productsData.length > 0) {
             products = productsData.map(row => ({
                 barcode: row.barcode,
                 name: row.name,
@@ -1017,7 +1028,7 @@ function loadProducts() {
     if (products.length === 0) {
         productsTableBody.innerHTML = `
             <tr>
-                <td colspan="7" class="empty-state">
+                <td colspan="8" class="empty-state">
                     <i class="fas fa-box-open"></i>
                     <p>Henüz ürün eklenmemiş</p>
                 </td>
@@ -1036,6 +1047,7 @@ function loadProducts() {
                 <td>${product.price.toFixed(2)} TL</td>
                 <td>${product.stock}</td>
                 <td>${product.minStock}</td>
+                <td>${product.kdv}%</td>
                 <td><span class="status-badge ${status.class}">${status.text}</span></td>
                 <td>
                     <div class="action-buttons">
@@ -1193,6 +1205,9 @@ function loadInventory() {
     const inventoryTableBody = document.getElementById('inventoryTableBody');
     if (!inventoryTableBody) return;
     
+    // İstatistikleri güncelle
+    updateInventoryStats();
+    
     if (products.length === 0) {
         inventoryTableBody.innerHTML = `
             <tr>
@@ -1230,6 +1245,24 @@ function loadInventory() {
     inventoryTableBody.innerHTML = tableHTML;
 }
 
+// Stok istatistiklerini güncelle
+function updateInventoryStats() {
+    const totalProducts = products.length;
+    const inStock = products.filter(p => p.stock > p.minStock).length;
+    const lowStock = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+    const outOfStock = products.filter(p => p.stock === 0).length;
+    
+    const statTotalProducts = document.getElementById('statTotalProducts');
+    const statInStock = document.getElementById('statInStock');
+    const statLowStock = document.getElementById('statLowStock');
+    const statOutOfStock = document.getElementById('statOutOfStock');
+    
+    if (statTotalProducts) statTotalProducts.textContent = totalProducts;
+    if (statInStock) statInStock.textContent = inStock;
+    if (statLowStock) statLowStock.textContent = lowStock;
+    if (statOutOfStock) statOutOfStock.textContent = outOfStock;
+}
+
 /* ======================================================
    RAPORLAR
    ====================================================== */
@@ -1239,16 +1272,18 @@ function loadReports(period = 'today') {
     console.log('Raporlar yükleniyor:', period);
     
     // Aktif butonu güncelle
-    document.querySelectorAll('.report-period-btn').forEach(btn => {
+    document.querySelectorAll('.btn-period').forEach(btn => {
         btn.classList.remove('active');
     });
-    document.querySelector(`[data-period="${period}"]`).classList.add('active');
+    const activeBtn = document.querySelector(`[data-period="${period}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
     
     const filteredSales = filterSalesByPeriod(period);
     const stats = calculateSalesStats(filteredSales);
     
     updateReportSummary(stats);
     updateSalesReport(filteredSales);
+    updateTopProducts(filteredSales);
 }
 
 // Satışları döneme göre filtrele
@@ -1266,6 +1301,7 @@ function filterSalesByPeriod(period) {
         case 'month':
             startDate = new Date(now.getFullYear(), now.getMonth(), 1);
             break;
+        case 'all':
         default:
             startDate = new Date(0);
     }
@@ -1278,6 +1314,7 @@ function calculateSalesStats(sales) {
     let totalSales = 0;
     let cashSales = 0;
     let cardSales = 0;
+    let totalItems = 0;
     
     sales.forEach(sale => {
         totalSales += sale.totalAmount || 0;
@@ -1286,6 +1323,13 @@ function calculateSalesStats(sales) {
         } else {
             cardSales += sale.totalAmount || 0;
         }
+        
+        // Toplam satılan ürün sayısını hesapla
+        if (sale.items && Array.isArray(sale.items)) {
+            sale.items.forEach(item => {
+                totalItems += item.quantity || 0;
+            });
+        }
     });
     
     return {
@@ -1293,6 +1337,7 @@ function calculateSalesStats(sales) {
         cashSales,
         cardSales,
         totalTransactions: sales.length,
+        totalItems,
         avgBasket: sales.length > 0 ? totalSales / sales.length : 0
     };
 }
@@ -1320,10 +1365,69 @@ function updateReportSummary(stats) {
             <span>${stats.totalTransactions}</span>
         </div>
         <div class="daily-stat-item">
+            <span>Satılan Ürün:</span>
+            <span>${stats.totalItems}</span>
+        </div>
+        <div class="daily-stat-item">
             <span>Ort. Sepet Tutarı:</span>
             <span>${stats.avgBasket.toFixed(2)} TL</span>
         </div>
     `;
+}
+
+// En çok satan ürünleri güncelle
+function updateTopProducts(sales) {
+    const topProductsContainer = document.getElementById('topProducts');
+    if (!topProductsContainer) return;
+    
+    // Ürün satış istatistiklerini hesapla
+    const productStats = {};
+    
+    sales.forEach(sale => {
+        if (sale.items && Array.isArray(sale.items)) {
+            sale.items.forEach(item => {
+                if (!productStats[item.barcode]) {
+                    productStats[item.barcode] = {
+                        name: item.name,
+                        quantity: 0,
+                        revenue: 0
+                    };
+                }
+                productStats[item.barcode].quantity += item.quantity || 0;
+                productStats[item.barcode].revenue += (item.price || 0) * (item.quantity || 0);
+            });
+        }
+    });
+    
+    // En çok satanları sırala
+    const topProducts = Object.values(productStats)
+        .sort((a, b) => b.quantity - a.quantity)
+        .slice(0, 5);
+    
+    if (topProducts.length === 0) {
+        topProductsContainer.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-trophy"></i>
+                <p>Satış verisi yok</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let topProductsHTML = '';
+    topProducts.forEach((product, index) => {
+        topProductsHTML += `
+            <div class="top-product-item">
+                <div class="product-rank">${index + 1}</div>
+                <div class="product-info">
+                    <strong>${product.name}</strong>
+                    <span>${product.quantity} adet - ${product.revenue.toFixed(2)} TL</span>
+                </div>
+            </div>
+        `;
+    });
+    
+    topProductsContainer.innerHTML = topProductsHTML;
 }
 
 // Satış raporunu güncelle
@@ -1354,9 +1458,17 @@ function updateSalesReport(sales) {
                 <td>${(sale.totalAmount || 0).toFixed(2)} TL</td>
                 <td>${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}</td>
                 <td>
-                    <button class="btn-small btn-info" onclick="viewSaleDetails(${sale.id})">
-                        <i class="fas fa-eye"></i>
-                    </button>
+                    <div class="action-buttons">
+                        <button class="btn-small btn-info" onclick="viewSaleDetails(${sale.id})">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        <button class="btn-small btn-warning" onclick="editSale(${sale.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-small btn-danger" onclick="deleteSale(${sale.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `;
@@ -1425,6 +1537,122 @@ function viewSaleDetails(saleId) {
     openModal('saleDetailModal');
 }
 
+// Satış düzenle
+function editSale(saleId) {
+    const sale = salesHistory.find(s => s.id === saleId);
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    document.getElementById('editSaleTotal').value = sale.totalAmount;
+    document.getElementById('editPaymentMethod').value = sale.paymentMethod;
+    document.getElementById('editCashAmount').value = sale.cashAmount;
+    document.getElementById('editCardAmount').value = sale.paymentMethod === 'kredi' ? sale.totalAmount : 0;
+    document.getElementById('editChangeAmount').value = sale.change;
+
+    document.getElementById('saleEditModal').setAttribute('data-sale-id', saleId);
+    openModal('saleEditModal');
+}
+
+// Satış güncelle
+async function updateSale() {
+    const saleId = document.getElementById('saleEditModal').getAttribute('data-sale-id');
+    const sale = salesHistory.find(s => s.id === parseInt(saleId));
+    
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    const updatedSale = {
+        totalAmount: parseFloat(document.getElementById('editSaleTotal').value),
+        paymentMethod: document.getElementById('editPaymentMethod').value,
+        cashAmount: parseFloat(document.getElementById('editCashAmount').value),
+        change: parseFloat(document.getElementById('editChangeAmount').value)
+    };
+
+    // Satışı güncelle
+    const index = salesHistory.findIndex(s => s.id === parseInt(saleId));
+    if (index !== -1) {
+        salesHistory[index] = { ...salesHistory[index], ...updatedSale };
+    }
+
+    try {
+        await saveToSupabase();
+        closeModal('saleEditModal');
+        loadReports();
+        showStatus('Satış başarıyla güncellendi!', 'success');
+    } catch (error) {
+        console.error('Satış güncelleme hatası:', error);
+        showStatus('Satış güncellenirken hata oluştu!', 'error');
+    }
+}
+
+// Satış sil
+function deleteSale(saleId) {
+    const sale = salesHistory.find(s => s.id === saleId);
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    // Silinecek satış bilgilerini göster
+    const saleInfo = document.getElementById('saleDeleteInfo');
+    saleInfo.innerHTML = `
+        <div class="sale-info-item">
+            <span>Fiş No:</span>
+            <span>${sale.id}</span>
+        </div>
+        <div class="sale-info-item">
+            <span>Tarih:</span>
+            <span>${new Date(sale.timestamp).toLocaleString('tr-TR')}</span>
+        </div>
+        <div class="sale-info-item">
+            <span>Toplam Tutar:</span>
+            <span>${sale.totalAmount.toFixed(2)} TL</span>
+        </div>
+    `;
+
+    document.getElementById('saleDeleteModal').setAttribute('data-sale-id', saleId);
+    openModal('saleDeleteModal');
+}
+
+// Satış silmeyi onayla
+async function confirmDeleteSale() {
+    const saleId = document.getElementById('saleDeleteModal').getAttribute('data-sale-id');
+    const sale = salesHistory.find(s => s.id === parseInt(saleId));
+    
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    try {
+        // Stokları geri ekle
+        if (sale.items && Array.isArray(sale.items)) {
+            sale.items.forEach(item => {
+                const product = products.find(p => p.barcode === item.barcode);
+                if (product) {
+                    product.stock += item.quantity;
+                }
+            });
+        }
+
+        // Satışı sil
+        salesHistory = salesHistory.filter(s => s.id !== parseInt(saleId));
+
+        await saveToSupabase();
+        closeModal('saleDeleteModal');
+        loadReports();
+        refreshDashboard();
+        showStatus('Satış başarıyla silindi!', 'success');
+    } catch (error) {
+        console.error('Satış silme hatası:', error);
+        showStatus('Satış silinirken hata oluştu!', 'error');
+    }
+}
+
 /* ======================================================
    KASA İŞLEMLERİ
    ====================================================== */
@@ -1452,6 +1680,8 @@ function updateCashDisplay() {
     const currentCashAmount = document.getElementById('currentCashAmount');
     const openCashBtn = document.getElementById('openCashBtn');
     const closeCashBtn = document.getElementById('closeCashBtn');
+    const cashStatusIcon = document.getElementById('cashStatusIcon');
+    const cashStatusText = document.getElementById('cashStatusText');
     
     if (cashRegister.isOpen) {
         if (cashStatusBadge) { 
@@ -1461,6 +1691,8 @@ function updateCashDisplay() {
         if (currentCashAmount) currentCashAmount.textContent = cashRegister.currentBalance.toFixed(2) + ' TL';
         if (openCashBtn) openCashBtn.style.display = 'none';
         if (closeCashBtn) closeCashBtn.style.display = 'block';
+        if (cashStatusIcon) cashStatusIcon.className = 'fas fa-lock-open';
+        if (cashStatusText) cashStatusText.textContent = 'Açık';
     } else {
         if (cashStatusBadge) { 
             cashStatusBadge.textContent = 'Kapalı'; 
@@ -1469,6 +1701,8 @@ function updateCashDisplay() {
         if (currentCashAmount) currentCashAmount.textContent = '0.00 TL';
         if (openCashBtn) openCashBtn.style.display = 'block';
         if (closeCashBtn) closeCashBtn.style.display = 'none';
+        if (cashStatusIcon) cashStatusIcon.className = 'fas fa-lock';
+        if (cashStatusText) cashStatusText.textContent = 'Kapalı';
     }
 }
 
@@ -1570,6 +1804,232 @@ function calculateCashDifference() {
 }
 
 /* ======================================================
+   YÖNETİM İŞLEMLERİ
+   ====================================================== */
+
+// Yönetim verilerini yükle
+function loadAdminData() {
+    updateAdminStats();
+    loadUsersTable();
+    loadAuditLogs();
+    loadBackupInfo();
+}
+
+// Yönetim istatistiklerini güncelle
+function updateAdminStats() {
+    const totalUsersElement = document.getElementById('totalUsers');
+    const totalSalesElement = document.getElementById('totalSales');
+    const totalRevenueElement = document.getElementById('totalRevenue');
+    
+    if (totalUsersElement) totalUsersElement.textContent = users.length;
+    if (totalSalesElement) totalSalesElement.textContent = salesHistory.length;
+    
+    const totalRevenue = salesHistory.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0);
+    if (totalRevenueElement) totalRevenueElement.textContent = totalRevenue.toFixed(2) + ' TL';
+}
+
+// Kullanıcı tablosunu yükle
+function loadUsersTable() {
+    const usersTableBody = document.getElementById('usersTableBody');
+    if (!usersTableBody) return;
+    
+    if (users.length === 0) {
+        usersTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <i class="fas fa-users"></i>
+                    <p>Kullanıcı bulunamadı</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    let tableHTML = '';
+    users.forEach(user => {
+        const lastLogin = user.lastLogin ? new Date(user.lastLogin).toLocaleString('tr-TR') : 'Hiç giriş yapmadı';
+        const roleText = user.role === 'admin' ? 'Yönetici' : user.role === 'cashier' ? 'Kasiyer' : 'Personel';
+        
+        tableHTML += `
+            <tr>
+                <td>${user.username}</td>
+                <td>${user.fullName}</td>
+                <td>${roleText}</td>
+                <td>${lastLogin}</td>
+                <td><span class="status-badge success">Aktif</span></td>
+                <td>
+                    <div class="action-buttons">
+                        <button class="btn-small btn-warning" onclick="editUser('${user.username}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn-small btn-danger" onclick="deleteUser('${user.username}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    usersTableBody.innerHTML = tableHTML;
+}
+
+// Denetim kayıtlarını yükle
+function loadAuditLogs() {
+    const auditLogsBody = document.getElementById('auditLogsBody');
+    if (!auditLogsBody) return;
+    
+    if (auditLogs.length === 0) {
+        auditLogsBody.innerHTML = `
+            <tr>
+                <td colspan="5" class="empty-state">
+                    <i class="fas fa-clipboard-list"></i>
+                    <p>Denetim kaydı bulunamadı</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    let tableHTML = '';
+    auditLogs.forEach(log => {
+        const logDate = new Date(log.timestamp).toLocaleString('tr-TR');
+        tableHTML += `
+            <tr>
+                <td>${logDate}</td>
+                <td>${log.user}</td>
+                <td>${log.action}</td>
+                <td>${log.description}</td>
+                <td>${log.ipAddress || 'N/A'}</td>
+            </tr>
+        `;
+    });
+    
+    auditLogsBody.innerHTML = tableHTML;
+}
+
+// Yedekleme bilgilerini yükle
+function loadBackupInfo() {
+    const lastBackupElement = document.getElementById('lastBackup');
+    const backupProductCountElement = document.getElementById('backupProductCount');
+    const backupUserCountElement = document.getElementById('backupUserCount');
+    
+    if (lastBackupElement) lastBackupElement.textContent = new Date().toLocaleString('tr-TR');
+    if (backupProductCountElement) backupProductCountElement.textContent = products.length;
+    if (backupUserCountElement) backupUserCountElement.textContent = users.length;
+}
+
+// Yönetim sekmesi değiştirme
+function openAdminTab(tabName) {
+    // Tüm sekme butonlarını pasif yap
+    document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Tüm sekme içeriklerini gizle
+    document.querySelectorAll('.admin-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Aktif sekme butonunu işaretle
+    const activeBtn = document.querySelector(`[data-admin-tab="${tabName}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+    
+    // Aktif sekme içeriğini göster
+    const activeContent = document.getElementById(`admin-${tabName}`);
+    if (activeContent) activeContent.classList.add('active');
+}
+
+// Yeni kullanıcı modal'ını aç
+function openAddUserModal() {
+    document.getElementById('addUserForm').reset();
+    openModal('addUserModal');
+}
+
+// Yeni kullanıcı oluştur
+function createNewUser(event) {
+    if (event) event.preventDefault();
+    
+    const username = document.getElementById('newUsername').value;
+    const password = document.getElementById('newPassword').value;
+    const passwordConfirm = document.getElementById('newPasswordConfirm').value;
+    const fullName = document.getElementById('newFullName').value;
+    const role = document.getElementById('newUserRole').value;
+    
+    if (password !== passwordConfirm) {
+        showStatus('Şifreler eşleşmiyor!', 'error');
+        return;
+    }
+    
+    if (users.find(u => u.username === username)) {
+        showStatus('Bu kullanıcı adı zaten kullanılıyor!', 'error');
+        return;
+    }
+    
+    const newUser = {
+        username: username,
+        fullName: fullName,
+        role: role,
+        lastLogin: null
+    };
+    
+    users.push(newUser);
+    closeModal('addUserModal');
+    loadUsersTable();
+    updateAdminStats();
+    showStatus('Kullanıcı başarıyla eklendi!', 'success');
+}
+
+// Kullanıcı düzenle
+function editUser(username) {
+    showStatus('Kullanıcı düzenleme özelliği yakında eklenecek!', 'info');
+}
+
+// Kullanıcı sil
+function deleteUser(username) {
+    if (username === 'admin') {
+        showStatus('Admin kullanıcısı silinemez!', 'error');
+        return;
+    }
+    
+    if (!confirm(`${username} kullanıcısını silmek istediğinizden emin misiniz?`)) {
+        return;
+    }
+    
+    users = users.filter(u => u.username !== username);
+    loadUsersTable();
+    updateAdminStats();
+    showStatus('Kullanıcı başarıyla silindi!', 'success');
+}
+
+// Denetim kayıtlarını yenile
+function refreshAuditLogs() {
+    loadAuditLogs();
+    showStatus('Denetim kayıtları yenilendi!', 'success');
+}
+
+// Yedek oluştur
+function createBackup() {
+    const backupData = {
+        products: products,
+        sales: salesHistory,
+        users: users,
+        cashRegister: cashRegister,
+        timestamp: new Date().toISOString()
+    };
+    
+    const dataStr = JSON.stringify(backupData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = `tekel-pos-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.click();
+    
+    showStatus('Yedek başarıyla oluşturuldu!', 'success');
+}
+
+/* ======================================================
    YARDIMCI FONKSİYONLAR
    ====================================================== */
 
@@ -1607,6 +2067,24 @@ function showStatus(message, type = 'info') {
     setTimeout(() => {
         statusElement.style.display = 'none';
     }, 3000);
+}
+
+// Local IP adresini al
+async function getLocalIP() {
+    try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        const ipElement = document.getElementById('localIP');
+        if (ipElement) {
+            ipElement.textContent = data.ip;
+        }
+    } catch (error) {
+        console.error('IP adresi alınamadı:', error);
+        const ipElement = document.getElementById('localIP');
+        if (ipElement) {
+            ipElement.textContent = '127.0.0.1';
+        }
+    }
 }
 
 // Sayfa kapatılırken verileri kaydet

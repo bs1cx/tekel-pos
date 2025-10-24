@@ -323,6 +323,7 @@
                                     <th>Ürün Adı</th>
                                     <th>Fiyat</th>
                                     <th>Stok</th>
+                                    <th>Min. Stok</th>
                                     <th>KDV</th>
                                     <th>Durum</th>
                                     <th>İşlemler</th>
@@ -330,7 +331,7 @@
                             </thead>
                             <tbody id="productsTableBody">
                                 <tr>
-                                    <td colspan="7" class="empty-state">
+                                    <td colspan="8" class="empty-state">
                                         <i class="fas fa-box-open"></i>
                                         <p>Henüz ürün eklenmemiş</p>
                                     </td>
@@ -509,6 +510,12 @@
                                     <i class="fas fa-filter"></i> Filtrele
                                 </button>
                             </div>
+                            <div class="report-periods">
+                                <button class="btn-period active" data-period="today" onclick="loadReports('today')">Bugün</button>
+                                <button class="btn-period" data-period="week" onclick="loadReports('week')">Bu Hafta</button>
+                                <button class="btn-period" data-period="month" onclick="loadReports('month')">Bu Ay</button>
+                                <button class="btn-period" data-period="all" onclick="loadReports('all')">Tümü</button>
+                            </div>
                             <button class="btn-primary" onclick="loadReports()">
                                 <i class="fas fa-sync-alt"></i> Yenile
                             </button>
@@ -517,11 +524,11 @@
 
                     <div class="reports-grid">
                         <div class="report-card">
-                            <h3>Günlük Özet</h3>
+                            <h3>Satış Özeti</h3>
                             <div class="daily-stats" id="dailyStats">
                                 <div class="empty-state">
                                     <i class="fas fa-chart-line"></i>
-                                    <p>Tarih seçin</p>
+                                    <p>Veri yükleniyor...</p>
                                 </div>
                             </div>
                         </div>
@@ -652,11 +659,12 @@
                                             <th>İşlem</th>
                                             <th>Tutar</th>
                                             <th>Açıklama</th>
+                                            <th>İşlemler</th>
                                         </tr>
                                     </thead>
                                     <tbody id="cashTransactionsBody">
                                         <tr>
-                                            <td colspan="5" class="empty-state">
+                                            <td colspan="6" class="empty-state">
                                                 <i class="fas fa-exchange-alt"></i>
                                                 <p>Henüz kasa hareketi yok</p>
                                             </td>
@@ -711,15 +719,16 @@
                                             <th>Ad Soyad</th>
                                             <th>Rol</th>
                                             <th>Son Giriş</th>
+                                            <th>Durum</th>
                                             <th>İşlemler</th>
                                         </tr>
                                     </thead>
                                     <tbody id="usersTableBody">
                                         <tr>
-                                            <td colspan="5" class="empty-state">
+                                            <td colspan="6" class="empty-state">
                                                 <i class="fas fa-users"></i>
                                                 <p>Kullanıcı yükleniyor...</p>
-                                        </td>
+                                            </td>
                                         </tr>
                                     </tbody>
                                 </table>
@@ -900,6 +909,56 @@
         </div>
     </div>
 
+    <!-- Edit Product Modal -->
+    <div id="editProductModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> Ürün Düzenle</h3>
+                <span class="close" onclick="closeModal('editProductModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="editProductForm">
+                    <div class="form-group">
+                        <label>Barkod:</label>
+                        <input type="text" id="editProductBarcode" required readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Ürün Adı:</label>
+                        <input type="text" id="editProductName" required>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Fiyat (TL):</label>
+                            <input type="number" id="editProductPrice" step="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Stok:</label>
+                            <input type="number" id="editProductStock" required min="0">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Min. Stok:</label>
+                            <input type="number" id="editProductMinStock" required min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>KDV (%):</label>
+                            <input type="number" id="editProductKDV" step="0.01" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>ÖTV (%):</label>
+                        <input type="number" id="editProductOTV" step="0.01">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeModal('editProductModal')">İptal</button>
+                <button type="button" class="btn-success" onclick="updateProduct()">Ürünü Güncelle</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Add User Modal -->
     <div id="addUserModal" class="modal" style="display: none;">
         <div class="modal-content">
@@ -957,6 +1016,22 @@
                     <i class="fas fa-print"></i> Yazdır
                 </button>
                 <button class="btn-secondary" onclick="closeModal('receiptModal')">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sale Detail Modal -->
+    <div id="saleDetailModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-receipt"></i> Satış Detayları</h3>
+                <span class="close" onclick="closeModal('saleDetailModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="saleDetailContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('saleDetailModal')">Kapat</button>
             </div>
         </div>
     </div>
