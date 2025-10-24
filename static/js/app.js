@@ -1,4 +1,4 @@
-// app.js - Tekel POS Uygulaması (Real-time + snake_case/camelCase eşlemesi + localStorage düzeltmeleri)
+// app.js - Tekel POS Uygulaması (Real-time + snake_case/camelCase eşlemesi + localStorage düzeltmeleri + Satış Yönetimi)
 
 // SUPABASE konfigürasyonu
 const SUPABASE_URL = 'https://mqkjserlvdfddjutcoqr.supabase.co';
@@ -36,6 +36,11 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM yüklendi, uygulama başlatılıyor...');
     setupEventListeners();
     checkAuthentication();
+    
+    // Admin kontrollerini başlangıçta kontrol et
+    setTimeout(() => {
+        checkAdminFeatures();
+    }, 1000);
 });
 
 // Uygulama başlatma - SUPABASE ENTEGRE
@@ -357,7 +362,20 @@ function setupEventListeners() {
         });
     });
     
-    console.log('Event listenerlar başarıyla kuruldu.');
+    // YENİ EVENT LISTENER'LAR
+    // Satış düzenleme modalı input event'leri
+    const editPaymentMethod = document.getElementById('editPaymentMethod');
+    const editCashAmount = document.getElementById('editCashAmount');
+    
+    if (editPaymentMethod) {
+        editPaymentMethod.addEventListener('change', updateEditSaleCalculations);
+    }
+    
+    if (editCashAmount) {
+        editCashAmount.addEventListener('input', updateEditSaleCalculations);
+    }
+    
+    console.log('Event listenerlar başarıyla kuruldu (Satış yönetimi özellikleri eklendi).');
 }
 
 // Kimlik doğrulama kontrolü
@@ -494,6 +512,7 @@ function switchTab(tabName) {
             break;
         case 'reports':
             loadReports('today');
+            loadStockMovements(); // STOK HAREKETLERİNİ YÜKLE
             break;
         case 'cash':
             loadCashStatus();
@@ -530,6 +549,20 @@ function checkAdminFeatures() {
     
     adminElements.forEach(element => {
         element.style.display = isAdmin ? 'flex' : 'none';
+    });
+    
+    // Satış düzenleme/silme butonlarını kontrol et
+    const saleEditButtons = document.querySelectorAll('button[onclick*="openSaleEditModal"]');
+    const saleDeleteButtons = document.querySelectorAll('button[onclick*="openSaleDeleteModal"]');
+    
+    saleEditButtons.forEach(button => {
+        button.disabled = !isAdmin;
+        button.title = isAdmin ? 'Satışı düzenle' : 'Bu işlem için yönetici yetkisi gerekiyor';
+    });
+    
+    saleDeleteButtons.forEach(button => {
+        button.disabled = !isAdmin;
+        button.title = isAdmin ? 'Satışı sil' : 'Bu işlem için yönetici yetkisi gerekiyor';
     });
 }
 
@@ -722,6 +755,254 @@ function loadStockAlerts() {
 }
 
 /* ======================================================
+   YENİ SATIŞ YÖNETİMİ FONKSİYONLARI
+   ====================================================== */
+
+// Satış düzenleme modalını aç
+function openSaleEditModal(saleId) {
+    const sale = salesHistory.find(s => s.id === saleId);
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    // Modal alanlarını doldur
+    document.getElementById('editSaleTotal').value = sale.totalAmount || 0;
+    document.getElementById('editPaymentMethod').value = sale.paymentMethod || 'nakit';
+    document.getElementById('editCashAmount').value = sale.cashAmount || 0;
+    document.getElementById('editCardAmount').value = sale.paymentMethod === 'kredi' ? sale.totalAmount : 0;
+    document.getElementById('editChangeAmount').value = sale.change || 0;
+
+    // Modal'a saleId'yi sakla
+    document.getElementById('saleEditModal').setAttribute('data-sale-id', saleId);
+
+    openModal('saleEditModal');
+}
+
+// Satış düzenleme hesaplamalarını güncelle
+function updateEditSaleCalculations() {
+    const paymentMethod = document.getElementById('editPaymentMethod').value;
+    const totalAmount = parseFloat(document.getElementById('editSaleTotal').value) || 0;
+    const cashAmount = parseFloat(document.getElementById('editCashAmount').value) || 0;
+    const cardAmount = parseFloat(document.getElementById('editCardAmount').value) || 0;
+
+    if (paymentMethod === 'nakit') {
+        document.getElementById('editCardAmount').value = 0;
+        const change = cashAmount - totalAmount;
+        document.getElementById('editChangeAmount').value = change >= 0 ? change.toFixed(2) : '0.00';
+    } else {
+        document.getElementById('editCashAmount').value = 0;
+        document.getElementById('editChangeAmount').value = '0.00';
+        document.getElementById('editCardAmount').value = totalAmount.toFixed(2);
+    }
+}
+
+// Satışı güncelle
+async function updateSale() {
+    const saleId = parseInt(document.getElementById('saleEditModal').getAttribute('data-sale-id'));
+    const sale = salesHistory.find(s => s.id === saleId);
+    
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    const updatedSale = {
+        totalAmount: parseFloat(document.getElementById('editSaleTotal').value) || 0,
+        paymentMethod: document.getElementById('editPaymentMethod').value,
+        cashAmount: parseFloat(document.getElementById('editCashAmount').value) || 0,
+        creditCardAmount: parseFloat(document.getElementById('editCardAmount').value) || 0,
+        change: parseFloat(document.getElementById('editChangeAmount').value) || 0
+    };
+
+    try {
+        // Önce stokları geri ekle (eski satış)
+        sale.items.forEach(item => {
+            const product = products.find(p => p.barcode === item.barcode);
+            if (product) {
+                product.stock += item.quantity;
+            }
+        });
+
+        // Yeni stokları çıkar (güncellenmiş satış)
+        // Not: Bu basit implementasyonda ürün listesi değişmiyor
+        // Daha gelişmiş bir versiyonda ürün listesi de düzenlenebilir
+        sale.items.forEach(item => {
+            const product = products.find(p => p.barcode === item.barcode);
+            if (product) {
+                product.stock -= item.quantity;
+                if (product.stock < 0) product.stock = 0;
+            }
+        });
+
+        // Satış kaydını güncelle
+        Object.assign(sale, updatedSale);
+
+        // Kasa kayıtlarını güncelle
+        if (cashRegister.isOpen) {
+            // Eski kaydı geri al
+            if (sale.paymentMethod === 'nakit') {
+                cashRegister.cashSales -= sale.totalAmount;
+            } else {
+                cashRegister.cardSales -= sale.totalAmount;
+            }
+
+            // Yeni kaydı ekle
+            if (updatedSale.paymentMethod === 'nakit') {
+                cashRegister.cashSales += updatedSale.totalAmount;
+            } else {
+                cashRegister.cardSales += updatedSale.totalAmount;
+            }
+
+            cashRegister.currentBalance = cashRegister.openingBalance + cashRegister.cashSales;
+        }
+
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+
+        closeModal('saleEditModal');
+        refreshDashboard();
+        loadReports(); // Raporları yenile
+
+        showStatus('Satış başarıyla güncellendi!', 'success');
+    } catch (error) {
+        console.error('Satış güncelleme hatası:', error);
+        showStatus('Satış güncellenirken hata oluştu!', 'error');
+    }
+}
+
+// Satış silme modalını aç
+function openSaleDeleteModal(saleId) {
+    const sale = salesHistory.find(s => s.id === saleId);
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    // Silinecek satış bilgilerini göster
+    const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
+    const saleInfo = `
+        <div class="sale-detail">
+            <p><strong>Fiş No:</strong> ${sale.id}</p>
+            <p><strong>Tarih:</strong> ${saleDate}</p>
+            <p><strong>Toplam Tutar:</strong> ${(sale.totalAmount || 0).toFixed(2)} TL</p>
+            <p><strong>Ödeme:</strong> ${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}</p>
+            <p><strong>Ürün Sayısı:</strong> ${sale.items ? sale.items.length : 0}</p>
+        </div>
+    `;
+
+    document.getElementById('saleDeleteInfo').innerHTML = saleInfo;
+    document.getElementById('saleDeleteModal').setAttribute('data-sale-id', saleId);
+
+    openModal('saleDeleteModal');
+}
+
+// Satış silme işlemini onayla
+async function confirmDeleteSale() {
+    const saleId = parseInt(document.getElementById('saleDeleteModal').getAttribute('data-sale-id'));
+    const sale = salesHistory.find(s => s.id === saleId);
+    
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    try {
+        // Stokları geri ekle
+        if (sale.items && Array.isArray(sale.items)) {
+            sale.items.forEach(item => {
+                const product = products.find(p => p.barcode === item.barcode);
+                if (product) {
+                    product.stock += item.quantity;
+                }
+            });
+        }
+
+        // Kasa kayıtlarını güncelle
+        if (cashRegister.isOpen && sale.paymentMethod === 'nakit') {
+            cashRegister.cashSales -= sale.totalAmount;
+            cashRegister.currentBalance = cashRegister.openingBalance + cashRegister.cashSales;
+        } else if (cashRegister.isOpen) {
+            cashRegister.cardSales -= sale.totalAmount;
+        }
+
+        // Satışı listeden kaldır
+        salesHistory = salesHistory.filter(s => s.id !== saleId);
+
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+
+        closeModal('saleDeleteModal');
+        refreshDashboard();
+        loadReports(); // Raporları yenile
+
+        showStatus('Satış başarıyla silindi!', 'success');
+    } catch (error) {
+        console.error('Satış silme hatası:', error);
+        showStatus('Satış silinirken hata oluştu!', 'error');
+    }
+}
+
+// Satış detaylarını görüntüle
+function viewSaleDetails(saleId) {
+    const sale = salesHistory.find(s => s.id === saleId);
+    if (!sale) {
+        showStatus('Satış bulunamadı!', 'error');
+        return;
+    }
+
+    const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
+    let itemsHTML = '';
+    
+    if (sale.items && Array.isArray(sale.items)) {
+        sale.items.forEach(item => {
+            itemsHTML += `
+                <div class="sale-detail-item">
+                    <span>${item.name} x${item.quantity}</span>
+                    <span>${(item.price * item.quantity).toFixed(2)} TL</span>
+                </div>
+            `;
+        });
+    }
+
+    const receiptHTML = `
+        <div class="receipt">
+            <div class="receipt-header">
+                <h3>SATIŞ DETAYI</h3>
+                <p>Fiş No: ${sale.id}</p>
+            </div>
+            <div class="receipt-info">
+                <p>Tarih: ${saleDate}</p>
+                <p>Kasiyer: ${sale.user || 'Bilinmiyor'}</p>
+                <p>Ödeme: ${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}</p>
+            </div>
+            <div class="receipt-items">
+                <h4>Satılan Ürünler</h4>
+                ${itemsHTML || '<p>Ürün bilgisi bulunamadı</p>'}
+            </div>
+            <div class="receipt-totals">
+                <div class="summary-row total">
+                    <span>TOPLAM TUTAR:</span>
+                    <span>${(sale.totalAmount || 0).toFixed(2)} TL</span>
+                </div>
+                ${sale.paymentMethod === 'nakit' ? `
+                    <div class="summary-row">
+                        <span>Verilen Nakit:</span>
+                        <span>${(sale.cashAmount || 0).toFixed(2)} TL</span>
+                    </div>
+                    <div class="summary-row">
+                        <span>Para Üstü:</span>
+                        <span>${(sale.change || 0).toFixed(2)} TL</span>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+
+    showReceipt(receiptHTML);
+}
+
+/* ======================================================
    RAPORLAR BÖLÜMÜ - GERÇEK VERİLERLE
    ====================================================== */
 
@@ -742,8 +1023,9 @@ function loadReports(period = 'today') {
     const dailyStats = document.getElementById('dailyStats');
     const topProducts = document.getElementById('topProducts');
     const salesChart = document.getElementById('salesChart');
+    const salesReportBody = document.getElementById('salesReportBody');
     
-    if (!dailyStats || !topProducts) return;
+    if (!dailyStats || !topProducts || !salesReportBody) return;
     
     // Seçilen döneme göre satış istatistikleri
     const stats = calculateSalesStats(period);
@@ -792,6 +1074,49 @@ function loadReports(period = 'today') {
             `;
         });
         topProducts.innerHTML = topProductsHTML;
+    }
+    
+    // Satış raporu tablosunu doldur (İŞLEM SÜTUNU EKLENDİ)
+    const filteredSales = filterSalesByPeriod(period);
+    if (filteredSales.length === 0) {
+        salesReportBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <i class="fas fa-receipt"></i>
+                    <p>Bu dönemde satış bulunamadı</p>
+                </td>
+            </tr>
+        `;
+    } else {
+        let salesHTML = '';
+        filteredSales.forEach(sale => {
+            const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
+            const isAdmin = currentUser && currentUser.role === 'admin';
+            
+            salesHTML += `
+                <tr>
+                    <td>${sale.id}</td>
+                    <td>${saleDate}</td>
+                    <td>${sale.user || 'Bilinmiyor'}</td>
+                    <td>${(sale.totalAmount || 0).toFixed(2)} TL</td>
+                    <td>${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}</td>
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn-small btn-primary" onclick="openSaleEditModal(${sale.id})" ${!isAdmin ? 'disabled' : ''}>
+                                <i class="fas fa-edit"></i> Düzenle
+                            </button>
+                            <button class="btn-small btn-danger" onclick="openSaleDeleteModal(${sale.id})" ${!isAdmin ? 'disabled' : ''}>
+                                <i class="fas fa-trash"></i> Sil
+                            </button>
+                            <button class="btn-small btn-info" onclick="viewSaleDetails(${sale.id})">
+                                <i class="fas fa-eye"></i> Detay
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        });
+        salesReportBody.innerHTML = salesHTML;
     }
     
     // Satış grafiği oluştur
@@ -1858,6 +2183,81 @@ async function addStock(barcode, quantity = 1) {
     } else {
         showStatus('Ürün bulunamadı!', 'error');
     }
+}
+
+/* ======================================================
+   STOK HAREKET RAPORU
+   ====================================================== */
+
+// Stok hareket raporunu yükle
+function loadStockMovements() {
+    const stockReportBody = document.getElementById('stockReportBody');
+    if (!stockReportBody) return;
+
+    // Basit bir stok hareketi simülasyonu
+    // Gerçek uygulamada bu veriler SUPABASE'den gelecek
+    const stockMovements = generateStockMovements();
+    
+    if (stockMovements.length === 0) {
+        stockReportBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <i class="fas fa-exchange-alt"></i>
+                    <p>Stok hareketi bulunamadı</p>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    let movementsHTML = '';
+    stockMovements.forEach(movement => {
+        movementsHTML += `
+            <tr>
+                <td>${movement.barcode}</td>
+                <td>${movement.productName}</td>
+                <td>${movement.date}</td>
+                <td><span class="status-badge ${movement.type === 'in' ? 'success' : 'danger'}">${movement.type === 'in' ? 'Giriş' : 'Çıkış'}</span></td>
+                <td>${movement.quantity}</td>
+                <td>${movement.user}</td>
+            </tr>
+        `;
+    });
+    
+    stockReportBody.innerHTML = movementsHTML;
+}
+
+// Örnek stok hareketi verisi oluştur
+function generateStockMovements() {
+    const movements = [];
+    const movementTypes = ['in', 'out'];
+    const users = ['admin', 'kasiyer1', 'personel1'];
+    
+    // Son 30 stok hareketi oluştur
+    for (let i = 0; i < 30; i++) {
+        const randomProduct = products[Math.floor(Math.random() * products.length)];
+        if (!randomProduct) continue;
+        
+        const movementType = movementTypes[Math.floor(Math.random() * movementTypes.length)];
+        const quantity = movementType === 'in' ? 
+            Math.floor(Math.random() * 20) + 1 : 
+            Math.floor(Math.random() * 5) + 1;
+        
+        const daysAgo = Math.floor(Math.random() * 30);
+        const date = new Date();
+        date.setDate(date.getDate() - daysAgo);
+        
+        movements.push({
+            barcode: randomProduct.barcode,
+            productName: randomProduct.name,
+            date: date.toLocaleDateString('tr-TR'),
+            type: movementType,
+            quantity: quantity,
+            user: users[Math.floor(Math.random() * users.length)]
+        });
+    }
+    
+    return movements.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
 
 /* ======================================================

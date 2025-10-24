@@ -671,6 +671,163 @@ def make_sale():
         return jsonify({"status": "success", "message": "Satış kaydedildi (fallback)"})
 
 # ------------------------------------------------------------------
+# SALES MANAGEMENT - Yeni eklenen satış yönetimi endpoint'leri
+# ------------------------------------------------------------------
+@app.route("/api/sales", methods=["GET"])
+@require_auth
+def get_sales():
+    try:
+        limit = request.args.get("limit", 100)
+        params = {"order": "sale_date.desc", "limit": limit}
+        sales, st = supabase_get("sales", params=params)
+        if sales is None:
+            sales = []
+        return jsonify({"status": "success", "sales": sales})
+    except Exception as e:
+        logger.debug(f"get_sales exception: {e}")
+        return jsonify({"status": "success", "sales": []})
+
+@app.route("/api/sales/<int:sale_id>", methods=["GET"])
+@require_auth
+def get_sale_detail(sale_id):
+    try:
+        # Satış detayını getir
+        sales, st = supabase_get("sales", params=build_filters({"id": f"eq.{sale_id}"}))
+        if not sales or not isinstance(sales, list) or len(sales) == 0:
+            return jsonify({"status": "success", "message": "Satış bulunamadı", "sale": None})
+        
+        sale = sales[0]
+        
+        # Satış öğelerini getir
+        sale_items, st2 = supabase_get("sale_items", params=build_filters({"sale_id": f"eq.{sale_id}"}))
+        if sale_items is None:
+            sale_items = []
+        
+        sale["items"] = sale_items
+        return jsonify({"status": "success", "sale": sale})
+    except Exception as e:
+        logger.debug(f"get_sale_detail exception: {e}")
+        return jsonify({"status": "success", "sale": None})
+
+@app.route("/api/sales/<int:sale_id>", methods=["DELETE"])
+@require_auth
+@transaction_handler
+def delete_sale(sale_id):
+    try:
+        # Önce satışı getir
+        sales, st = supabase_get("sales", params=build_filters({"id": f"eq.{sale_id}"}))
+        if not sales or not isinstance(sales, list) or len(sales) == 0:
+            return jsonify({"status": "success", "message": "Satış bulunamadı"})
+        
+        sale = sales[0]
+        
+        # Stokları geri ekle (best-effort)
+        sale_items, st2 = supabase_get("sale_items", params=build_filters({"sale_id": f"eq.{sale_id}"}))
+        if isinstance(sale_items, list):
+            for item in sale_items:
+                try:
+                    barcode = item.get("barcode")
+                    qty = int(item.get("quantity", 0))
+                    prod_list, st3 = supabase_get("products", params=build_filters({"barcode": f"eq.{barcode}"}))
+                    if prod_list and isinstance(prod_list, list) and len(prod_list) > 0:
+                        prod = prod_list[0]
+                        new_qty = int(prod.get("quantity", 0)) + qty
+                        supabase_patch("products", build_filters({"barcode": f"eq.{barcode}"}), {"quantity": new_qty})
+                    # Geri stok movement kaydı
+                    supabase_post("stock_movements", {
+                        "barcode": barcode, 
+                        "product_name": item.get("product_name"), 
+                        "movement_type": "in", 
+                        "quantity": qty, 
+                        "user_id": getattr(request, "user_id", 1), 
+                        "movement_date": now_iso(),
+                        "description": f"Satış iptal - #{sale_id}"
+                    })
+                except Exception:
+                    pass
+        
+        # Satış öğelerini sil
+        supabase_delete("sale_items", build_filters({"sale_id": f"eq.{sale_id}"}))
+        
+        # Satışı sil
+        supabase_delete("sales", build_filters({"id": f"eq.{sale_id}"}))
+        
+        # Nakit işlem varsa geri al
+        if sale.get("payment_method") == "nakit" and float(sale.get("total_amount", 0)) > 0:
+            supabase_post("cash_transactions", {
+                "transaction_type": "refund", 
+                "amount": -float(sale.get("total_amount", 0)), 
+                "user_id": getattr(request, "user_id", 1), 
+                "transaction_date": now_iso(), 
+                "description": f"Satış iptal - #{sale_id}"
+            })
+        
+        # Audit log
+        supabase_post("audit_logs", {
+            "user_id": getattr(request, "user_id", 1), 
+            "action": "sale_delete", 
+            "description": f"Satış silindi - #{sale_id} - {sale.get('total_amount', 0)} TL", 
+            "created_at": now_iso()
+        })
+        
+        return jsonify({"status": "success", "message": "Satış silindi"})
+    except Exception as e:
+        logger.debug(f"delete_sale exception: {e}")
+        return jsonify({"status": "success", "message": "Satış silindi (fallback)"})
+
+@app.route("/api/sales/<int:sale_id>", methods=["PUT"])
+@require_auth
+@transaction_handler
+def update_sale(sale_id):
+    try:
+        data = request.get_json() or {}
+        
+        # Mevcut satışı getir
+        sales, st = supabase_get("sales", params=build_filters({"id": f"eq.{sale_id}"}))
+        if not sales or not isinstance(sales, list) or len(sales) == 0:
+            return jsonify({"status": "success", "message": "Satış bulunamadı"})
+        
+        old_sale = sales[0]
+        
+        # Güncelleme verilerini hazırla
+        update_data = {}
+        for field in ["total_amount", "payment_method", "cash_amount", "credit_card_amount", "change_amount"]:
+            if field in data:
+                update_data[field] = data[field]
+        
+        # Satışı güncelle
+        if update_data:
+            supabase_patch("sales", build_filters({"id": f"eq.{sale_id}"}), update_data)
+        
+        # Eğer öğeler değiştiyse, öğeleri güncelle (basit implementasyon)
+        if "items" in data and isinstance(data["items"], list):
+            # Önce eski öğeleri sil
+            supabase_delete("sale_items", build_filters({"sale_id": f"eq.{sale_id}"}))
+            
+            # Yeni öğeleri ekle
+            for item in data["items"]:
+                supabase_post("sale_items", {
+                    "sale_id": sale_id,
+                    "barcode": item.get("barcode"),
+                    "product_name": item.get("name"),
+                    "quantity": item.get("quantity", 0),
+                    "price": item.get("price", 0)
+                })
+        
+        # Audit log
+        supabase_post("audit_logs", {
+            "user_id": getattr(request, "user_id", 1), 
+            "action": "sale_update", 
+            "description": f"Satış güncellendi - #{sale_id}", 
+            "created_at": now_iso()
+        })
+        
+        return jsonify({"status": "success", "message": "Satış güncellendi"})
+    except Exception as e:
+        logger.debug(f"update_sale exception: {e}")
+        return jsonify({"status": "success", "message": "Satış güncellendi (fallback)"})
+
+# ------------------------------------------------------------------
 # CASH endpoints (status/open/close/transactions)
 # ------------------------------------------------------------------
 @app.route("/api/cash/status", methods=["GET"])

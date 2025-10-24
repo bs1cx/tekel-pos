@@ -548,7 +548,7 @@
                                         <th>Kasiyer</th>
                                         <th>Toplam</th>
                                         <th>Ödeme</th>
-                                        <th>İşlem</th>
+                                        <th>İşlemler</th>
                                     </tr>
                                 </thead>
                                 <tbody id="salesReportBody">
@@ -957,6 +957,68 @@
                     <i class="fas fa-print"></i> Yazdır
                 </button>
                 <button class="btn-secondary" onclick="closeModal('receiptModal')">Kapat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sale Edit Modal -->
+    <div id="saleEditModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> Satış Düzenle</h3>
+                <span class="close" onclick="closeModal('saleEditModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="saleEditContent">
+                    <div class="form-group">
+                        <label>Toplam Tutar (TL):</label>
+                        <input type="number" id="editSaleTotal" step="0.01" min="0" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Ödeme Yöntemi:</label>
+                        <select id="editPaymentMethod" required>
+                            <option value="nakit">Nakit</option>
+                            <option value="kredi">Kredi Kartı</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Nakit Miktarı (TL):</label>
+                        <input type="number" id="editCashAmount" step="0.01" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Kart Miktarı (TL):</label>
+                        <input type="number" id="editCardAmount" step="0.01" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Para Üstü (TL):</label>
+                        <input type="number" id="editChangeAmount" step="0.01" min="0" value="0" readonly>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('saleEditModal')">İptal</button>
+                <button class="btn-success" onclick="updateSale()">Satışı Güncelle</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sale Delete Modal -->
+    <div id="saleDeleteModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-trash"></i> Satış Sil</h3>
+                <span class="close" onclick="closeModal('saleDeleteModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Bu satışı silmek istediğinizden emin misiniz?</p>
+                <div class="sale-info" id="saleDeleteInfo">
+                    <!-- Satış bilgileri buraya dinamik olarak eklenecek -->
+                </div>
+                <p class="warning-text"><i class="fas fa-exclamation-triangle"></i> Bu işlem geri alınamaz! Stoklar otomatik olarak geri eklenecektir.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeModal('saleDeleteModal')">İptal</button>
+                <button class="btn-danger" onclick="confirmDeleteSale()">Satışı Sil</button>
             </div>
         </div>
     </div>
