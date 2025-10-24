@@ -1,3 +1,5 @@
+[file name]: style.css
+[file content begin]
 /* Modern Reset */
 * {
     margin: 0;
@@ -1191,8 +1193,6 @@ body {
     100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-/* EKSİK CSS KURALLARI - JavaScript'teki yeni öğeler için */
-
 /* Demo Scanner Stilleri */
 .demo-scanner {
     padding: 20px;
@@ -1933,3 +1933,525 @@ body {
 .quick-barcodes .btn-small {
     margin: 2px;
 }
+
+/* YENİ EKLENEN SATIŞ YÖNETİMİ STİLLERİ */
+
+/* Satış Düzenleme Modal */
+.sale-detail {
+    background: var(--light);
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+}
+
+.sale-detail p {
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.sale-detail strong {
+    color: var(--dark);
+}
+
+/* Action Buttons */
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-info {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-info:hover {
+    background: var(--primary-dark);
+}
+
+/* Rapor Tablosu */
+.sales-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+}
+
+.sales-report-table th {
+    background: var(--light);
+    padding: 16px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--dark);
+    border-bottom: 2px solid var(--border);
+}
+
+.sales-report-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.sales-report-table tr:last-child td {
+    border-bottom: none;
+}
+
+/* Grafik Bileşenleri */
+.sales-chart {
+    background: white;
+    padding: 24px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+}
+
+.chart-bars {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+    height: 200px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.chart-bar-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+}
+
+.chart-bar {
+    background: var(--primary);
+    width: 30px;
+    border-radius: 4px 4px 0 0;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.chart-bar:hover {
+    background: var(--primary-dark);
+    transform: scale(1.05);
+}
+
+.chart-bar-value {
+    position: absolute;
+    top: -25px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dark);
+}
+
+.chart-bar-label {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--gray);
+    text-align: center;
+}
+
+.chart-legend {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+/* Rapor İstatistikleri */
+.daily-stats {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    margin-bottom: 24px;
+}
+
+.daily-stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.daily-stat-item:last-child {
+    border-bottom: none;
+}
+
+/* Top Products */
+.top-products-list {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+}
+
+.top-product-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.top-product-item:last-child {
+    border-bottom: none;
+}
+
+/* Tarama Animasyonları */
+.scanning-state {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.scanning-animation {
+    width: 200px;
+    height: 4px;
+    background: var(--primary);
+    margin: 20px auto;
+    border-radius: 2px;
+    animation: scanning 2s ease-in-out infinite;
+}
+
+@keyframes scanning {
+    0%, 100% { transform: translateX(-50px); opacity: 0; }
+    50% { transform: translateX(50px); opacity: 1; }
+}
+
+.scanning-hint {
+    font-size: 12px;
+    color: var(--gray);
+    margin-top: 8px;
+}
+
+/* Demo Barcode List */
+.barcode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 16px 0;
+}
+
+.barcode-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--light);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.barcode-option:hover {
+    background: var(--gray-light);
+    transform: translateX(5px);
+}
+
+.barcode-option i {
+    color: var(--primary);
+}
+
+/* Manual Input Section */
+.manual-input-section {
+    margin-top: 20px;
+    padding: 20px;
+    background: var(--light);
+    border-radius: 12px;
+}
+
+.input-group {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.form-input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.form-input:focus {
+    border-color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(46, 134, 222, 0.1);
+}
+
+/* Scan States */
+.scan-success, .scan-warning {
+    text-align: center;
+    padding: 30px 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.scan-success {
+    background: rgba(29, 209, 161, 0.1);
+    border: 2px solid var(--success);
+}
+
+.scan-warning {
+    background: rgba(249, 168, 38, 0.1);
+    border: 2px solid var(--warning);
+}
+
+.scan-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.product-info {
+    margin: 16px 0;
+    padding: 16px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+}
+
+/* Demo Scanning */
+.demo-scanning {
+    text-align: center;
+    padding: 30px 20px;
+}
+
+.demo-barcodes {
+    margin: 20px 0;
+    text-align: left;
+}
+
+/* Mobile Product Form */
+#mobileProductForm {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    margin-top: 20px;
+}
+
+/* Activity Items */
+.activity-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--light);
+    border-radius: 8px;
+    margin-bottom: 8px;
+}
+
+.activity-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+}
+
+.activity-info {
+    flex: 1;
+}
+
+.activity-info strong {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 14px;
+}
+
+.activity-info span {
+    font-size: 12px;
+    color: var(--gray);
+}
+
+.activity-badge {
+    padding: 4px 8px;
+    background: var(--success);
+    color: white;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Quantity Controls */
+.btn-quantity {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: var(--primary);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+}
+
+.btn-quantity:hover {
+    background: var(--primary-dark);
+    transform: scale(1.1);
+}
+
+.btn-remove {
+    background: var(--danger);
+    color: white;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.3s ease;
+}
+
+.btn-remove:hover {
+    background: #e84118;
+    transform: scale(1.1);
+}
+
+/* Item Controls */
+.item-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.item-total {
+    font-weight: 600;
+    color: var(--success);
+    min-width: 60px;
+    text-align: right;
+}
+
+/* Item Info */
+.item-info h4 {
+    color: var(--dark);
+    margin-bottom: 4px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.item-details {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.item-details .price {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.item-details .barcode {
+    color: var(--gray);
+    font-family: monospace;
+}
+
+/* Responsive Improvements */
+@media (max-width: 480px) {
+    .action-buttons {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .scan-actions {
+        flex-direction: column;
+    }
+    
+    .chart-bars {
+        gap: 6px;
+    }
+    
+    .chart-bar {
+        width: 20px;
+    }
+    
+    .admin-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .admin-tab-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .modal-content {
+        background: var(--darker);
+        color: white;
+    }
+    
+    .modal-header h3 {
+        color: white;
+    }
+    
+    .form-group label {
+        color: white;
+    }
+    
+    .form-group input,
+    .form-group select {
+        background: var(--dark);
+        border-color: var(--gray);
+        color: white;
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+        border-color: var(--primary);
+    }
+}
+
+/* High contrast support */
+@media (prefers-contrast: high) {
+    :root {
+        --primary: #0056b3;
+        --success: #28a745;
+        --warning: #ffc107;
+        --danger: #dc3545;
+    }
+    
+    .btn-primary,
+    .btn-success,
+    .btn-danger {
+        border: 2px solid currentColor;
+    }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+[file content end]
