@@ -20,9 +20,52 @@ let cashRegister = {
     cardSales: 0
 };
 
+// Sayfa yüklendiğinde localStorage'ı temizle ve demo verileri yükle
+function clearAndInitialize() {
+    console.log('LocalStorage temizleniyor ve demo veriler yükleniyor...');
+    
+    // Sadece kullanıcı bilgisini sakla, diğer verileri temizle
+    const savedUser = localStorage.getItem('currentUser');
+    
+    // Tüm verileri temizle
+    localStorage.removeItem('tekel_pos_products');
+    localStorage.removeItem('tekel_pos_sales');
+    localStorage.removeItem('tekel_pos_cash');
+    localStorage.removeItem('tekel_pos_users');
+    
+    // Demo verileri yükle
+    loadDemoProducts();
+    loadDemoUsers();
+    
+    // Varsayılan kasa durumu
+    cashRegister = {
+        isOpen: false,
+        openingBalance: 0,
+        currentBalance: 0,
+        cashSales: 0,
+        cardSales: 0
+    };
+    
+    // Boş satış geçmişi
+    salesHistory = [];
+    
+    // Boş sepet
+    cart = [];
+    
+    console.log('Demo veriler yüklendi:', {
+        products: products.length,
+        users: users.length,
+        sales: salesHistory.length
+    });
+}
+
 // DOM yüklendiğinde çalışacak fonksiyonlar
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM yüklendi, uygulama başlatılıyor...');
+    
+    // Sayfa her yüklendiğinde temiz başlat
+    clearAndInitialize();
+    
     setupEventListeners();
     checkAuthentication();
     getLocalIP();
@@ -174,20 +217,14 @@ async function initializeApp() {
     console.log('Uygulama başlatılıyor...');
     
     try {
-        await loadFromSupabase();
+        // SUPABASE bağlantısını devre dışı bırak - sadece local demo verileri kullan
+        console.log('Demo mod: Sadece local veriler kullanılıyor');
         
-        // Demo veriler yoksa yükle
-        if (products.length === 0) {
-            loadDemoProducts();
-            await saveToSupabase();
-        }
+        // Demo veriler zaten yüklü, sadece UI'ı güncelle
+        refreshDashboard();
+        loadProductGrid();
         
-        // Demo kullanıcılar
-        if (users.length === 0) {
-            loadDemoUsers();
-        }
-        
-        console.log('Uygulama başlatma tamamlandı');
+        console.log('Uygulama başlatma tamamlandı (Demo mod)');
     } catch (error) {
         console.error('Uygulama başlatma hatası:', error);
         showStatus('Uygulama başlatılırken hata oluştu!', 'error');
@@ -311,170 +348,42 @@ function updateBreadcrumb(tabName) {
 
 // Demo ürünleri yükle
 function loadDemoProducts() {
-    if (products.length === 0) {
-        console.log('Demo ürünler yükleniyor...');
-        products = [
-            { barcode: '8691234567890', name: 'Marlboro Red', price: 45.00, stock: 50, minStock: 10, kdv: 18, otv: 0 },
-            { barcode: '8691234567891', name: 'Marlboro Gold', price: 47.50, stock: 30, minStock: 10, kdv: 18, otv: 0 },
-            { barcode: '8691234567892', name: 'Camel Yellow', price: 43.00, stock: 25, minStock: 5, kdv: 18, otv: 0 },
-            { barcode: '8691234567893', name: 'Winston Blue', price: 44.50, stock: 40, minStock: 8, kdv: 18, otv: 0 },
-            { barcode: '8691234567894', name: 'Parliament Night Blue', price: 52.00, stock: 15, minStock: 5, kdv: 18, otv: 0 },
-            { barcode: '8691234567895', name: 'Samsun Siyah', price: 38.00, stock: 20, minStock: 5, kdv: 18, otv: 0 },
-            { barcode: '8691234567896', name: 'Tekel 2000', price: 42.50, stock: 35, minStock: 8, kdv: 18, otv: 0 },
-            { barcode: '8691234567897', name: 'L&M Red', price: 41.00, stock: 28, minStock: 6, kdv: 18, otv: 0 }
-        ];
-    }
+    console.log('Demo ürünler yükleniyor...');
+    products = [
+        { barcode: '8691234567890', name: 'Marlboro Red', price: 45.00, stock: 50, minStock: 10, kdv: 18, otv: 0 },
+        { barcode: '8691234567891', name: 'Marlboro Gold', price: 47.50, stock: 30, minStock: 10, kdv: 18, otv: 0 },
+        { barcode: '8691234567892', name: 'Camel Yellow', price: 43.00, stock: 25, minStock: 5, kdv: 18, otv: 0 },
+        { barcode: '8691234567893', name: 'Winston Blue', price: 44.50, stock: 40, minStock: 8, kdv: 18, otv: 0 },
+        { barcode: '8691234567894', name: 'Parliament Night Blue', price: 52.00, stock: 15, minStock: 5, kdv: 18, otv: 0 },
+        { barcode: '8691234567895', name: 'Samsun Siyah', price: 38.00, stock: 20, minStock: 5, kdv: 18, otv: 0 },
+        { barcode: '8691234567896', name: 'Tekel 2000', price: 42.50, stock: 35, minStock: 8, kdv: 18, otv: 0 },
+        { barcode: '8691234567897', name: 'L&M Red', price: 41.00, stock: 28, minStock: 6, kdv: 18, otv: 0 }
+    ];
+    console.log('Demo ürünler yüklendi:', products.length);
 }
 
 // Demo kullanıcıları yükle
 function loadDemoUsers() {
-    if (users.length === 0) {
-        users = [
-            { username: 'admin', fullName: 'Sistem Yöneticisi', role: 'admin', lastLogin: new Date().toISOString() },
-            { username: 'kasiyer1', fullName: 'Ahmet Yılmaz', role: 'cashier', lastLogin: new Date().toISOString() },
-            { username: 'kasiyer2', fullName: 'Ayşe Demir', role: 'cashier', lastLogin: new Date().toISOString() }
-        ];
-    }
+    console.log('Demo kullanıcılar yükleniyor...');
+    users = [
+        { username: 'admin', fullName: 'Sistem Yöneticisi', role: 'admin', lastLogin: new Date().toISOString() },
+        { username: 'kasiyer1', fullName: 'Ahmet Yılmaz', role: 'cashier', lastLogin: new Date().toISOString() },
+        { username: 'kasiyer2', fullName: 'Ayşe Demir', role: 'cashier', lastLogin: new Date().toISOString() }
+    ];
+    console.log('Demo kullanıcılar yüklendi:', users.length);
 }
 
-// SUPABASE'den veri yükle
+// SUPABASE bağlantısını devre dışı bırak - sadece local veriler kullan
 async function loadFromSupabase() {
-    try {
-        console.log('Supabase verileri yükleniyor...');
-
-        // Products
-        const { data: productsData, error: productsError } = await supabase
-            .from('products')
-            .select('*');
-
-        if (productsError) {
-            console.error('Products yüklenirken hata:', productsError);
-        } else if (productsData && productsData.length > 0) {
-            products = productsData.map(row => ({
-                barcode: row.barcode,
-                name: row.name,
-                price: Number(row.price) || 0,
-                stock: Number(row.stock) || 0,
-                minStock: Number(row.min_stock) || 0,
-                kdv: Number(row.kdv) || 0,
-                otv: Number(row.otv) || 0
-            }));
-            console.log('Products yüklendi:', products.length);
-        }
-
-        // Sales
-        const { data: salesData, error: salesError } = await supabase
-            .from('sales')
-            .select('*')
-            .order('timestamp', { ascending: false });
-
-        if (salesError) {
-            console.error('Sales yüklenirken hata:', salesError);
-        } else if (salesData) {
-            salesHistory = salesData.map(row => ({
-                id: row.id,
-                timestamp: row.timestamp,
-                items: row.items || [],
-                totalAmount: Number(row.total_amount) || 0,
-                paymentMethod: row.payment_method || 'nakit',
-                cashAmount: Number(row.cash_amount) || 0,
-                change: Number(row.change_amount) || 0,
-                user: row.user_name || 'unknown'
-            }));
-            console.log('Sales yüklendi:', salesHistory.length);
-        }
-
-        // Cash register
-        const { data: cashData, error: cashError } = await supabase
-            .from('cash_register')
-            .select('*')
-            .limit(1);
-
-        if (cashError) {
-            console.error('Cash register yüklenirken hata:', cashError);
-        } else if (cashData && cashData.length > 0) {
-            const cash = cashData[0];
-            cashRegister = {
-                isOpen: !!cash.is_open,
-                openingBalance: Number(cash.opening_balance) || 0,
-                currentBalance: Number(cash.current_balance) || 0,
-                cashSales: Number(cash.cash_sales) || 0,
-                cardSales: Number(cash.card_sales) || 0
-            };
-            console.log('Cash register yüklendi');
-        }
-
-    } catch (error) {
-        console.error('SUPABASE yükleme hatası:', error);
-        throw error;
-    }
+    console.log('Demo mod: SUPABASE bağlantısı devre dışı');
+    // Bu fonksiyon artık hiçbir şey yapmıyor, sadece demo veriler kullanılıyor
+    return Promise.resolve();
 }
 
-// SUPABASE'e kaydet
 async function saveToSupabase() {
-    try {
-        console.log('Supabase verileri kaydediliyor...');
-
-        // Products'ı güncelle
-        const formattedProducts = products.map(p => ({
-            barcode: p.barcode,
-            name: p.name,
-            price: p.price,
-            stock: p.stock,
-            min_stock: p.minStock,
-            kdv: p.kdv,
-            otv: p.otv
-        }));
-
-        if (formattedProducts.length > 0) {
-            const { error: productsError } = await supabase
-                .from('products')
-                .upsert(formattedProducts, { onConflict: 'barcode' });
-
-            if (productsError) throw productsError;
-        }
-
-        // Sales'ı güncelle
-        const recentSales = salesHistory.slice(-100);
-        if (recentSales.length > 0) {
-            const formattedSales = recentSales.map(s => ({
-                id: s.id,
-                timestamp: s.timestamp,
-                items: s.items,
-                total_amount: s.totalAmount,
-                payment_method: s.paymentMethod,
-                cash_amount: s.cashAmount,
-                change_amount: s.change,
-                user_name: s.user
-            }));
-
-            const { error: salesError } = await supabase
-                .from('sales')
-                .upsert(formattedSales, { onConflict: 'id' });
-
-            if (salesError) throw salesError;
-        }
-
-        // Cash register'ı güncelle
-        const formattedCash = {
-            is_open: cashRegister.isOpen,
-            opening_balance: cashRegister.openingBalance,
-            current_balance: cashRegister.currentBalance,
-            cash_sales: cashRegister.cashSales,
-            card_sales: cashRegister.cardSales
-        };
-
-        const { error: cashError } = await supabase
-            .from('cash_register')
-            .upsert([formattedCash], { onConflict: 'id' });
-
-        if (cashError) throw cashError;
-
-        console.log('Supabase verileri başarıyla kaydedildi');
-    } catch (error) {
-        console.error('SUPABASE kayıt hatası:', error);
-        throw error;
-    }
+    console.log('Demo mod: SUPABASE kaydı devre dışı');
+    // Bu fonksiyon artık hiçbir şey yapmıyor, veriler sadece session'da kalıyor
+    return Promise.resolve();
 }
 
 // Dashboard'u yenile
@@ -594,7 +503,6 @@ async function addStock(barcode, quantity = 1) {
     const product = products.find(p => p.barcode === barcode);
     if (product) {
         product.stock += quantity;
-        await saveToSupabase();
         refreshDashboard();
         loadInventory();
         showStatus(`${product.name} stoğuna ${quantity} adet eklendi!`, 'success');
@@ -921,9 +829,6 @@ async function completeSale() {
         document.querySelector('input[name="paymentMethod"][value="nakit"]').checked = true;
         toggleCashInput();
         
-        // SUPABASE'e kaydet
-        await saveToSupabase();
-        
         // Dashboard'u yenile
         refreshDashboard();
         
@@ -1124,7 +1029,6 @@ async function updateProduct() {
     }
     
     try {
-        await saveToSupabase();
         closeModal('editProductModal');
         loadProducts();
         loadInventory();
@@ -1145,7 +1049,6 @@ async function deleteProduct(barcode) {
     products = products.filter(p => p.barcode !== barcode);
     
     try {
-        await saveToSupabase();
         loadProducts();
         loadInventory();
         refreshDashboard();
@@ -1184,7 +1087,6 @@ async function addNewProduct(event) {
     products.push(newProduct);
     
     try {
-        await saveToSupabase();
         closeModal('addProductModal');
         loadProducts();
         loadInventory();
@@ -1579,7 +1481,6 @@ async function updateSale() {
     }
 
     try {
-        await saveToSupabase();
         closeModal('saleEditModal');
         loadReports();
         showStatus('Satış başarıyla güncellendi!', 'success');
@@ -1642,7 +1543,6 @@ async function confirmDeleteSale() {
         // Satışı sil
         salesHistory = salesHistory.filter(s => s.id !== parseInt(saleId));
 
-        await saveToSupabase();
         closeModal('saleDeleteModal');
         loadReports();
         refreshDashboard();
@@ -1734,7 +1634,6 @@ async function openCash() {
     };
     
     try {
-        await saveToSupabase();
         closeModal('cashOpenModal');
         loadCashStatus();
         showStatus('Kasa açıldı!', 'success');
@@ -1775,7 +1674,6 @@ async function closeCash() {
     cashRegister.isOpen = false;
     
     try {
-        await saveToSupabase();
         closeModal('cashCloseModal');
         loadCashStatus();
         
@@ -2087,11 +1985,9 @@ async function getLocalIP() {
     }
 }
 
-// Sayfa kapatılırken verileri kaydet
-window.addEventListener('beforeunload', function() {
-    if (currentUser) {
-        saveToSupabase().catch(console.error);
-    }
-});
+// Sayfa kapatılırken verileri kaydet - DEVRE DIŞI
+// window.addEventListener('beforeunload', function() {
+//     // Artık veriler kaydedilmiyor
+// });
 
-console.log('Tekel POS uygulaması yüklendi!');
+console.log('Tekel POS uygulaması yüklendi! (Demo Mod)');
