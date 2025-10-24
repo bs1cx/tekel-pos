@@ -74,7 +74,10 @@ async function initializeApp() {
     } catch (error) {
         console.error('Uygulama başlatma hatası:', error);
         showStatus('Uygulama başlatılırken hata oluştu!', 'error');
-        loadFromLocalStorage();
+        // Hata durumunda localStorage'dan yükleme yapma, sadece demo verilerle devam et
+        if (products.length === 0) {
+            loadDemoProducts();
+        }
     }
 }
 
@@ -206,13 +209,10 @@ async function loadFromSupabase() {
             console.log('Cash register yüklendi');
         }
 
-        // LocalStorage'ı güncelle
-        saveToLocalStorage();
-
         console.log('Supabase load tamamlandı.');
     } catch (error) {
         console.error('SUPABASE yükleme hatası:', error);
-        loadFromLocalStorage();
+        throw error; // Hatayı yukarı fırlat
     }
 }
 
@@ -280,10 +280,9 @@ async function saveToSupabase() {
         }
 
         console.log('Supabase verileri başarıyla kaydedildi');
-        saveToLocalStorage();
     } catch (error) {
         console.error('SUPABASE kayıt hatası:', error);
-        saveToLocalStorage();
+        throw error; // Hatayı yukarı fırlat
     }
 }
 
@@ -581,64 +580,6 @@ function loadDemoProducts() {
             { barcode: '8691234567897', name: 'L&M Red', price: 41.00, stock: 28, minStock: 6, kdv: 18, otv: 0 }
         ];
         console.log('Demo ürünler yüklendi:', products.length, 'ürün');
-    }
-}
-
-// LocalStorage'dan yükle
-function loadFromLocalStorage() {
-    console.log('LocalStorage verileri yükleniyor...');
-    
-    const savedProducts = localStorage.getItem('products');
-    const savedCart = localStorage.getItem('cart');
-    const savedCashRegister = localStorage.getItem('cashRegister');
-    const savedSalesHistory = localStorage.getItem('salesHistory');
-    
-    if (savedProducts) {
-        try {
-            products = JSON.parse(savedProducts);
-            console.log('LocalStorage products yüklendi:', products.length, 'ürün');
-        } catch (e) {
-            console.warn('LocalStorage products parse hatası', e);
-            products = [];
-        }
-    }
-    
-    if (savedCart) {
-        try {
-            cart = JSON.parse(savedCart);
-            updateCartDisplay();
-            console.log('LocalStorage cart yüklendi:', cart.length, 'ürün');
-        } catch (e) {
-            cart = [];
-        }
-    }
-    
-    if (savedCashRegister) {
-        try {
-            cashRegister = JSON.parse(savedCashRegister);
-            console.log('LocalStorage cashRegister yüklendi');
-        } catch (e) {}
-    }
-    
-    if (savedSalesHistory) {
-        try {
-            salesHistory = JSON.parse(savedSalesHistory);
-            console.log('LocalStorage salesHistory yüklendi:', salesHistory.length, 'satış');
-        } catch (e) {
-            salesHistory = [];
-        }
-    }
-}
-
-// LocalStorage'a kaydet
-function saveToLocalStorage() {
-    try {
-        localStorage.setItem('products', JSON.stringify(products));
-        localStorage.setItem('cart', JSON.stringify(cart));
-        localStorage.setItem('cashRegister', JSON.stringify(cashRegister));
-        localStorage.setItem('salesHistory', JSON.stringify(salesHistory));
-    } catch (err) {
-        console.warn('LocalStorage yazma hatası:', err);
     }
 }
 
@@ -999,469 +940,356 @@ function viewSaleDetails(saleId) {
         </div>
     `;
 
-    showReceipt(receiptHTML);
+    document.getElementById('saleDetailContent').innerHTML = receiptHTML;
+    openModal('saleDetailModal');
 }
 
 /* ======================================================
-   RAPORLAR BÖLÜMÜ - GERÇEK VERİLERLE
+   ÜRÜN YÖNETİMİ FONKSİYONLARI
    ====================================================== */
 
-// Raporları yükle - GERÇEK VERİLERLE
-function loadReports(period = 'today') {
-    console.log(`Raporlar yükleniyor - Dönem: ${period}`);
+// Ürünleri yükle
+function loadProducts() {
+    console.log('Ürünler yükleniyor...');
+    const productList = document.getElementById('productList');
+    if (!productList) return;
     
-    // Aktif butonu güncelle
-    const reportPeriodBtns = document.querySelectorAll('.report-period-btn');
-    reportPeriodBtns.forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.getAttribute('data-period') === period) {
-            btn.classList.add('active');
-        }
-    });
-    
-    // Gerçek verilerle raporları oluştur
-    const dailyStats = document.getElementById('dailyStats');
-    const topProducts = document.getElementById('topProducts');
-    const salesChart = document.getElementById('salesChart');
-    const salesReportBody = document.getElementById('salesReportBody');
-    
-    if (!dailyStats || !topProducts || !salesReportBody) return;
-    
-    // Seçilen döneme göre satış istatistikleri
-    const stats = calculateSalesStats(period);
-    
-    // Günlük istatistikleri göster
-    dailyStats.innerHTML = `
-        <div class="daily-stat-item">
-            <span>Toplam Satış:</span>
-            <span>${stats.totalSales.toFixed(2)} TL</span>
-        </div>
-        <div class="daily-stat-item">
-            <span>Nakit Satış:</span>
-            <span>${stats.cashSales.toFixed(2)} TL</span>
-        </div>
-        <div class="daily-stat-item">
-            <span>Kartlı Satış:</span>
-            <span>${stats.cardSales.toFixed(2)} TL</span>
-        </div>
-        <div class="daily-stat-item">
-            <span>Toplam İşlem:</span>
-            <span>${stats.totalTransactions}</span>
-        </div>
-        <div class="daily-stat-item">
-            <span>Ort. Sepet Tutarı:</span>
-            <span>${stats.avgBasket.toFixed(2)} TL</span>
-        </div>
-    `;
-    
-    // En çok satan ürünler
-    const topProductsData = getTopProducts(period);
-    if (topProductsData.length === 0) {
-        topProducts.innerHTML = `
+    if (products.length === 0) {
+        productList.innerHTML = `
             <div class="empty-state">
-                <i class="fas fa-chart-bar"></i>
-                <p>Bu dönemde satış verisi yok</p>
-            </div>
-        `;
-    } else {
-        let topProductsHTML = '';
-        topProductsData.forEach((product, index) => {
-            topProductsHTML += `
-                <div class="top-product-item">
-                    <span>${index + 1}. ${product.name}</span>
-                    <span>${product.quantity} adet - ${product.total.toFixed(2)} TL</span>
-                </div>
-            `;
-        });
-        topProducts.innerHTML = topProductsHTML;
-    }
-    
-    // Satış raporu tablosunu doldur (İŞLEM SÜTUNU EKLENDİ)
-    const filteredSales = filterSalesByPeriod(period);
-    if (filteredSales.length === 0) {
-        salesReportBody.innerHTML = `
-            <tr>
-                <td colspan="6" class="empty-state">
-                    <i class="fas fa-receipt"></i>
-                    <p>Bu dönemde satış bulunamadı</p>
-                </td>
-            </tr>
-        `;
-    } else {
-        let salesHTML = '';
-        filteredSales.forEach(sale => {
-            const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
-            const isAdmin = currentUser && currentUser.role === 'admin';
-            
-            salesHTML += `
-                <tr>
-                    <td>${sale.id}</td>
-                    <td>${saleDate}</td>
-                    <td>${sale.user || 'Bilinmiyor'}</td>
-                    <td>${(sale.totalAmount || 0).toFixed(2)} TL</td>
-                    <td>${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}</td>
-                    <td>
-                        <div class="action-buttons">
-                            <button class="btn-small btn-primary" onclick="openSaleEditModal(${sale.id})" ${!isAdmin ? 'disabled' : ''}>
-                                <i class="fas fa-edit"></i> Düzenle
-                            </button>
-                            <button class="btn-small btn-danger" onclick="openSaleDeleteModal(${sale.id})" ${!isAdmin ? 'disabled' : ''}>
-                                <i class="fas fa-trash"></i> Sil
-                            </button>
-                            <button class="btn-small btn-info" onclick="viewSaleDetails(${sale.id})">
-                                <i class="fas fa-eye"></i> Detay
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        });
-        salesReportBody.innerHTML = salesHTML;
-    }
-    
-    // Satış grafiği oluştur
-    renderSalesChart(period, salesChart);
-    
-    // Detaylı rapor butonlarını güncelle
-    updateReportButtons(period);
-}
-
-// Satış istatistiklerini hesapla
-function calculateSalesStats(period) {
-    const filteredSales = filterSalesByPeriod(period);
-    
-    let totalSales = 0;
-    let cashSales = 0;
-    let cardSales = 0;
-    let totalTransactions = filteredSales.length;
-    
-    filteredSales.forEach(sale => {
-        totalSales += sale.totalAmount || 0;
-        if (sale.paymentMethod === 'nakit') {
-            cashSales += sale.totalAmount || 0;
-        } else {
-            cardSales += sale.totalAmount || 0;
-        }
-    });
-    
-    const avgBasket = totalTransactions > 0 ? totalSales / totalTransactions : 0;
-    
-    return {
-        totalSales,
-        cashSales,
-        cardSales,
-        totalTransactions,
-        avgBasket
-    };
-}
-
-// Satışları döneme göre filtrele
-function filterSalesByPeriod(period) {
-    const now = new Date();
-    let startDate;
-    
-    switch(period) {
-        case 'today':
-            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            break;
-        case 'week':
-            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-            break;
-        case 'month':
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            break;
-        case 'year':
-            startDate = new Date(now.getFullYear(), 0, 1);
-            break;
-        default:
-            startDate = new Date(0); // Tüm zamanlar
-    }
-    
-    return salesHistory.filter(sale => {
-        const saleDate = new Date(sale.timestamp);
-        return saleDate >= startDate;
-    });
-}
-
-// En çok satan ürünleri getir
-function getTopProducts(period, limit = 5) {
-    const filteredSales = filterSalesByPeriod(period);
-    const productSales = {};
-    
-    // Tüm satışlardaki ürünleri topla
-    filteredSales.forEach(sale => {
-        if (sale.items && Array.isArray(sale.items)) {
-            sale.items.forEach(item => {
-                if (!productSales[item.barcode]) {
-                    productSales[item.barcode] = {
-                        name: item.name,
-                        quantity: 0,
-                        total: 0
-                    };
-                }
-                productSales[item.barcode].quantity += item.quantity || 0;
-                productSales[item.barcode].total += (item.price || 0) * (item.quantity || 0);
-            });
-        }
-    });
-    
-    // Sırala ve limit uygula
-    return Object.values(productSales)
-        .sort((a, b) => b.quantity - a.quantity)
-        .slice(0, limit);
-}
-
-// Satış grafiği oluştur
-function renderSalesChart(period, chartContainer) {
-    if (!chartContainer) return;
-    
-    const filteredSales = filterSalesByPeriod(period);
-    const dailySales = {};
-    
-    // Günlük satışları grupla
-    filteredSales.forEach(sale => {
-        const saleDate = new Date(sale.timestamp).toLocaleDateString('tr-TR');
-        if (!dailySales[saleDate]) {
-            dailySales[saleDate] = 0;
-        }
-        dailySales[saleDate] += sale.totalAmount || 0;
-    });
-    
-    // Grafik verilerini hazırla
-    const dates = Object.keys(dailySales).sort();
-    const amounts = dates.map(date => dailySales[date]);
-    
-    // Basit bir HTML grafiği oluştur
-    if (dates.length === 0) {
-        chartContainer.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-chart-line"></i>
-                <p>Bu dönemde satış verisi yok</p>
+                <i class="fas fa-box-open"></i>
+                <p>Henüz ürün eklenmemiş</p>
+                <button class="btn-primary" onclick="openProductModal()">
+                    <i class="fas fa-plus"></i> İlk Ürünü Ekle
+                </button>
             </div>
         `;
         return;
     }
     
-    const maxAmount = Math.max(...amounts);
-    const chartHeight = 200;
-    
-    let chartHTML = `
-        <div class="sales-chart">
-            <div class="chart-bars">
-    `;
-    
-    dates.forEach((date, index) => {
-        const height = (amounts[index] / maxAmount) * chartHeight;
-        chartHTML += `
-            <div class="chart-bar-container">
-                <div class="chart-bar" style="height: ${height}px" title="${date}: ${amounts[index].toFixed(2)} TL">
-                    <span class="chart-bar-value">${amounts[index].toFixed(0)}</span>
-                </div>
-                <span class="chart-bar-label">${date.split('.')[0]}/${date.split('.')[1]}</span>
-            </div>
-        `;
-    });
-    
-    chartHTML += `
-            </div>
-        </div>
-        <div class="chart-legend">
-            <span><i class="fas fa-square" style="color: #3498db"></i> Günlük Satışlar</span>
-            <span>Toplam: ${amounts.reduce((a, b) => a + b, 0).toFixed(2)} TL</span>
-        </div>
-    `;
-    
-    chartContainer.innerHTML = chartHTML;
-}
-
-// Rapor butonlarını güncelle
-function updateReportButtons(period) {
-    const printBtn = document.getElementById('printReportBtn');
-    const exportBtn = document.getElementById('exportReportBtn');
-    
-    if (printBtn) {
-        printBtn.onclick = () => printReport(period);
-    }
-    
-    if (exportBtn) {
-        exportBtn.onclick = () => exportReport(period);
-    }
-}
-
-// Rapor yazdır
-function printReport(period) {
-    const stats = calculateSalesStats(period);
-    const topProducts = getTopProducts(period);
-    
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Tekel POS Raporu - ${period}</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                .report-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-                .report-header h1 { margin: 0; color: #2c3e50; }
-                .report-period { color: #666; margin: 5px 0; }
-                .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
-                .stat-item { padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
-                .stat-value { font-size: 18px; font-weight: bold; color: #2c3e50; }
-                .top-products { margin: 20px 0; }
-                .product-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
-                .footer { margin-top: 30px; text-align: center; color: #666; font-size: 12px; }
-                @media print {
-                    body { margin: 0; padding: 10px; }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="report-header">
-                <h1>TEKEL MARKET POS RAPORU</h1>
-                <div class="report-period">Dönem: ${getPeriodText(period)}</div>
-                <div class="report-period">Tarih: ${new Date().toLocaleDateString('tr-TR')}</div>
-            </div>
-            
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div>Toplam Satış</div>
-                    <div class="stat-value">${stats.totalSales.toFixed(2)} TL</div>
-                </div>
-                <div class="stat-item">
-                    <div>Nakit Satış</div>
-                    <div class="stat-value">${stats.cashSales.toFixed(2)} TL</div>
-                </div>
-                <div class="stat-item">
-                    <div>Kartlı Satış</div>
-                    <div class="stat-value">${stats.cardSales.toFixed(2)} TL</div>
-                </div>
-                <div class="stat-item">
-                    <div>Toplam İşlem</div>
-                    <div class="stat-value">${stats.totalTransactions}</div>
-                </div>
-            </div>
-            
-            <div class="top-products">
-                <h3>En Çok Satan Ürünler</h3>
-                ${topProducts.map((product, index) => `
-                    <div class="product-item">
-                        <span>${index + 1}. ${product.name}</span>
-                        <span>${product.quantity} adet - ${product.total.toFixed(2)} TL</span>
+    let productsHTML = '';
+    products.forEach(product => {
+        productsHTML += `
+            <div class="product-card">
+                <div class="product-info">
+                    <h4>${product.name}</h4>
+                    <p class="product-barcode">${product.barcode}</p>
+                    <div class="product-details">
+                        <span class="price">${product.price.toFixed(2)} TL</span>
+                        <span class="stock ${product.stock <= product.minStock ? 'low-stock' : ''}">
+                            Stok: ${product.stock}
+                        </span>
                     </div>
-                `).join('')}
+                </div>
+                <div class="product-actions">
+                    <button class="btn-small" onclick="editProduct('${product.barcode}')">
+                        <i class="fas fa-edit"></i> Düzenle
+                    </button>
+                    <button class="btn-small btn-danger" onclick="deleteProduct('${product.barcode}')">
+                        <i class="fas fa-trash"></i> Sil
+                    </button>
+                </div>
             </div>
-            
-            <div class="footer">
-                <p>Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}</p>
-                <p>Tekel POS Sistemi - Otomatik Oluşturulmuştur</p>
-            </div>
-        </body>
-        </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+        `;
+    });
+    
+    productList.innerHTML = productsHTML;
+    console.log('Ürünler başarıyla yüklendi:', products.length, 'ürün');
 }
 
-// Raporu dışa aktar
-function exportReport(period) {
-    const stats = calculateSalesStats(period);
-    const topProducts = getTopProducts(period);
-    
-    const csvContent = [
-        ['Tekel Market POS Raporu', `Dönem: ${getPeriodText(period)}`, `Tarih: ${new Date().toLocaleDateString('tr-TR')}`],
-        [],
-        ['GENEL İSTATİSTİKLER'],
-        ['Toplam Satış', `${stats.totalSales.toFixed(2)} TL`],
-        ['Nakit Satış', `${stats.cashSales.toFixed(2)} TL`],
-        ['Kartlı Satış', `${stats.cardSales.toFixed(2)} TL`],
-        ['Toplam İşlem', stats.totalTransactions],
-        ['Ortalama Sepet', `${stats.avgBasket.toFixed(2)} TL`],
-        [],
-        ['EN ÇOK SATAN ÜRÜNLER'],
-        ['Sıra', 'Ürün Adı', 'Adet', 'Toplam Tutar'],
-        ...topProducts.map((product, index) => [
-            index + 1,
-            product.name,
-            product.quantity,
-            `${product.total.toFixed(2)} TL`
-        ]),
-        [],
-        ['Rapor Tarihi', new Date().toLocaleString('tr-TR')]
-    ];
-    
-    const csvString = csvContent.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `tekel-pos-raporu-${period}-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    showStatus('Rapor başarıyla dışa aktarıldı!', 'success');
+// Ürün ekleme modalını aç
+function openProductModal() {
+    editingProduct = null;
+    document.getElementById('productForm').reset();
+    document.getElementById('productModalTitle').textContent = 'Yeni Ürün Ekle';
+    openModal('productModal');
 }
 
-// Dönem metnini getir
-function getPeriodText(period) {
-    const periods = {
-        'today': 'Bugün',
-        'week': 'Bu Hafta',
-        'month': 'Bu Ay',
-        'year': 'Bu Yıl',
-        'all': 'Tüm Zamanlar'
-    };
-    return periods[period] || period;
-}
-
-/* ======================================================
-   SATIŞ İŞLEMLERİ
-   ====================================================== */
-
-// Barkod ile ürün ekle
-function addProductByBarcode() {
-    const barcodeInput = document.getElementById('barcodeInput');
-    const barcode = barcodeInput ? barcodeInput.value.trim() : '';
-    
-    if (!barcode) {
-        showStatus('Lütfen barkod girin!', 'error');
-        return;
-    }
-    
+// Ürün düzenleme modalını aç
+function editProduct(barcode) {
     const product = products.find(p => p.barcode === barcode);
-    
     if (!product) {
         showStatus('Ürün bulunamadı!', 'error');
         return;
     }
     
-    if (product.stock <= 0) {
-        showStatus('Bu ürün stokta yok!', 'error');
+    editingProduct = product;
+    document.getElementById('productBarcode').value = product.barcode;
+    document.getElementById('productName').value = product.name;
+    document.getElementById('productPrice').value = product.price;
+    document.getElementById('productStock').value = product.stock;
+    document.getElementById('productMinStock').value = product.minStock;
+    document.getElementById('productKdv').value = product.kdv;
+    document.getElementById('productOtv').value = product.otv;
+    
+    document.getElementById('productModalTitle').textContent = 'Ürünü Düzenle';
+    openModal('productModal');
+}
+
+// Ürün kaydetme işlemi
+async function saveProduct() {
+    const barcode = document.getElementById('productBarcode').value.trim();
+    const name = document.getElementById('productName').value.trim();
+    const price = parseFloat(document.getElementById('productPrice').value) || 0;
+    const stock = parseInt(document.getElementById('productStock').value) || 0;
+    const minStock = parseInt(document.getElementById('productMinStock').value) || 0;
+    const kdv = parseFloat(document.getElementById('productKdv').value) || 0;
+    const otv = parseFloat(document.getElementById('productOtv').value) || 0;
+    
+    if (!barcode || !name) {
+        showStatus('Barkod ve ürün adı zorunludur!', 'error');
         return;
     }
     
-    addToCart(product);
-    if (barcodeInput) {
-        barcodeInput.value = '';
-        barcodeInput.focus();
+    if (price <= 0) {
+        showStatus('Geçerli bir fiyat giriniz!', 'error');
+        return;
     }
-    showStatus(`${product.name} sepete eklendi!`, 'success');
+    
+    try {
+        if (editingProduct) {
+            // Ürün düzenleme
+            const productIndex = products.findIndex(p => p.barcode === editingProduct.barcode);
+            if (productIndex !== -1) {
+                products[productIndex] = {
+                    barcode: barcode,
+                    name: name,
+                    price: price,
+                    stock: stock,
+                    minStock: minStock,
+                    kdv: kdv,
+                    otv: otv
+                };
+            }
+            showStatus('Ürün başarıyla güncellendi!', 'success');
+        } else {
+            // Yeni ürün ekleme
+            const existingProduct = products.find(p => p.barcode === barcode);
+            if (existingProduct) {
+                showStatus('Bu barkod ile kayıtlı ürün zaten var!', 'error');
+                return;
+            }
+            
+            products.push({
+                barcode: barcode,
+                name: name,
+                price: price,
+                stock: stock,
+                minStock: minStock,
+                kdv: kdv,
+                otv: otv
+            });
+            showStatus('Ürün başarıyla eklendi!', 'success');
+        }
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
+        closeModal('productModal');
+        loadProducts();
+        refreshDashboard();
+        
+    } catch (error) {
+        console.error('Ürün kaydetme hatası:', error);
+        showStatus('Ürün kaydedilirken hata oluştu!', 'error');
+    }
 }
+
+// Ürün silme işlemi
+async function deleteProduct(barcode) {
+    if (!confirm('Bu ürünü silmek istediğinizden emin misiniz?')) {
+        return;
+    }
+    
+    try {
+        products = products.filter(p => p.barcode !== barcode);
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
+        showStatus('Ürün başarıyla silindi!', 'success');
+        loadProducts();
+        refreshDashboard();
+    } catch (error) {
+        console.error('Ürün silme hatası:', error);
+        showStatus('Ürün silinirken hata oluştu!', 'error');
+    }
+}
+
+/* ======================================================
+   STOK YÖNETİMİ FONKSİYONLARI
+   ====================================================== */
+
+// Stok yönetimi sayfasını yükle
+function loadInventory() {
+    console.log('Stok yönetimi yükleniyor...');
+    const inventoryList = document.getElementById('inventoryList');
+    if (!inventoryList) return;
+    
+    if (products.length === 0) {
+        inventoryList.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-boxes"></i>
+                <p>Henüz ürün eklenmemiş</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let inventoryHTML = '';
+    products.forEach(product => {
+        const stockStatus = product.stock === 0 ? 'out-of-stock' : 
+                           product.stock <= product.minStock ? 'low-stock' : 'in-stock';
+        
+        inventoryHTML += `
+            <div class="inventory-item ${stockStatus}">
+                <div class="inventory-info">
+                    <h4>${product.name}</h4>
+                    <p class="inventory-barcode">${product.barcode}</p>
+                </div>
+                <div class="inventory-stock">
+                    <div class="stock-info">
+                        <span class="current-stock">${product.stock} adet</span>
+                        <span class="min-stock">Min: ${product.minStock}</span>
+                    </div>
+                    <div class="inventory-actions">
+                        <button class="btn-small" onclick="addStock('${product.barcode}')">
+                            <i class="fas fa-plus"></i> Stok Ekle
+                        </button>
+                        <button class="btn-small btn-outline" onclick="reduceStock('${product.barcode}')">
+                            <i class="fas fa-minus"></i> Stok Eksilt
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    inventoryList.innerHTML = inventoryHTML;
+    console.log('Stok yönetimi başarıyla yüklendi');
+}
+
+// Stok ekleme modalını aç
+function addStock(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    document.getElementById('stockProductName').textContent = product.name;
+    document.getElementById('stockProductBarcode').textContent = product.barcode;
+    document.getElementById('stockProductCurrent').textContent = product.stock;
+    document.getElementById('stockAddAmount').value = '';
+    
+    document.getElementById('stockModal').setAttribute('data-product-barcode', barcode);
+    openModal('stockModal');
+}
+
+// Stok ekleme işlemi
+async function confirmAddStock() {
+    const barcode = document.getElementById('stockModal').getAttribute('data-product-barcode');
+    const amount = parseInt(document.getElementById('stockAddAmount').value) || 0;
+    
+    if (amount <= 0) {
+        showStatus('Geçerli bir miktar giriniz!', 'error');
+        return;
+    }
+    
+    try {
+        const product = products.find(p => p.barcode === barcode);
+        if (product) {
+            product.stock += amount;
+            
+            // SUPABASE'e kaydet
+            await saveToSupabase();
+            
+            showStatus(`${amount} adet stok eklendi!`, 'success');
+            closeModal('stockModal');
+            loadInventory();
+            refreshDashboard();
+        }
+    } catch (error) {
+        console.error('Stok ekleme hatası:', error);
+        showStatus('Stok eklenirken hata oluştu!', 'error');
+    }
+}
+
+// Stok eksiltme modalını aç
+function reduceStock(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
+    
+    document.getElementById('reduceProductName').textContent = product.name;
+    document.getElementById('reduceProductBarcode').textContent = product.barcode;
+    document.getElementById('reduceProductCurrent').textContent = product.stock;
+    document.getElementById('stockReduceAmount').value = '';
+    document.getElementById('stockReduceReason').value = '';
+    
+    document.getElementById('reduceStockModal').setAttribute('data-product-barcode', barcode);
+    openModal('reduceStockModal');
+}
+
+// Stok eksiltme işlemi
+async function confirmReduceStock() {
+    const barcode = document.getElementById('reduceStockModal').getAttribute('data-product-barcode');
+    const amount = parseInt(document.getElementById('stockReduceAmount').value) || 0;
+    const reason = document.getElementById('stockReduceReason').value.trim();
+    
+    if (amount <= 0) {
+        showStatus('Geçerli bir miktar giriniz!', 'error');
+        return;
+    }
+    
+    if (!reason) {
+        showStatus('Lütfen stok eksiltme nedenini belirtiniz!', 'error');
+        return;
+    }
+    
+    try {
+        const product = products.find(p => p.barcode === barcode);
+        if (product) {
+            if (amount > product.stock) {
+                showStatus('Eksiltme miktarı mevcut stoktan fazla olamaz!', 'error');
+                return;
+            }
+            
+            product.stock -= amount;
+            
+            // SUPABASE'e kaydet
+            await saveToSupabase();
+            
+            showStatus(`${amount} adet stok eksiltildi!`, 'success');
+            closeModal('reduceStockModal');
+            loadInventory();
+            refreshDashboard();
+        }
+    } catch (error) {
+        console.error('Stok eksiltme hatası:', error);
+        showStatus('Stok eksiltilirken hata oluştu!', 'error');
+    }
+}
+
+/* ======================================================
+   SATIŞ İŞLEMLERİ FONKSİYONLARI
+   ====================================================== */
 
 // Ürün grid'ini yükle
 function loadProductGrid() {
     const productGrid = document.getElementById('productGrid');
-    
     if (!productGrid) return;
     
     if (products.length === 0) {
         productGrid.innerHTML = `
             <div class="empty-state">
-                <i class="fas fa-box-open"></i>
-                <p>Ürün bulunamadı</p>
+                <i class="fas fa-shopping-cart"></i>
+                <p>Satış yapmak için önce ürün ekleyin</p>
+                <button class="btn-primary" onclick="switchTab('products')">
+                    <i class="fas fa-plus"></i> Ürün Ekle
+                </button>
             </div>
         `;
         return;
@@ -1471,81 +1299,50 @@ function loadProductGrid() {
     products.forEach(product => {
         if (product.stock > 0) {
             gridHTML += `
-                <div class="product-card" data-barcode="${product.barcode}" data-name="${product.name.toLowerCase()}">
-                    <div class="product-info">
+                <div class="product-grid-item" onclick="addToCart('${product.barcode}')">
+                    <div class="grid-product-info">
                         <h4>${product.name}</h4>
-                        <div class="product-details">
-                            <span class="product-price">${product.price.toFixed(2)} TL</span>
-                            <span class="product-stock">Stok: ${product.stock}</span>
-                        </div>
-                        <div class="product-barcode">${product.barcode}</div>
+                        <p class="grid-product-price">${product.price.toFixed(2)} TL</p>
+                        <p class="grid-product-stock">Stok: ${product.stock}</p>
                     </div>
-                    <button class="btn-primary btn-small" onclick="addToCartFromGrid('${product.barcode}')">
-                        <i class="fas fa-plus"></i> Ekle
-                    </button>
                 </div>
             `;
         }
     });
     
     productGrid.innerHTML = gridHTML;
+    updateCartDisplay();
 }
 
-// Grid'den sepete ürün ekle
-function addToCartFromGrid(barcode) {
-    const product = products.find(p => p.barcode === barcode);
-    if (product) {
-        addToCart(product);
-    }
-}
-
-// Ürünleri filtrele
-function filterProducts() {
-    const searchInput = document.getElementById('productSearch');
-    if (!searchInput) return;
-    const searchTerm = searchInput.value.toLowerCase().trim();
-    const productGrid = document.getElementById('productGrid');
-    if (!productGrid) return;
-    const productCards = productGrid.getElementsByClassName('product-card');
+// Barkod ile ürün ekle
+function addProductByBarcode() {
+    const barcodeInput = document.getElementById('barcodeInput');
+    const barcode = barcodeInput.value.trim();
     
-    let hasVisibleProducts = false;
-    
-    for (let card of productCards) {
-        const productName = card.getAttribute('data-name');
-        const productBarcode = card.getAttribute('data-barcode');
-        const matchesSearch = (productName && productName.includes(searchTerm)) || 
-                            (productBarcode && productBarcode.includes(searchTerm));
-        
-        if (matchesSearch) {
-            card.style.display = 'flex';
-            hasVisibleProducts = true;
-        } else {
-            card.style.display = 'none';
-        }
+    if (!barcode) {
+        showStatus('Lütfen barkod giriniz!', 'error');
+        return;
     }
     
-    if (!hasVisibleProducts && searchTerm) {
-        productGrid.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-search"></i>
-                <p>"${searchTerm}" için ürün bulunamadı</p>
-                <small>Farklı bir anahtar kelime deneyin</small>
-            </div>
-        `;
-    } else if (!hasVisibleProducts) {
-        productGrid.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-box-open"></i>
-                <p>Ürün bulunamadı</p>
-            </div>
-        `;
-    }
+    addToCart(barcode);
+    barcodeInput.value = '';
+    barcodeInput.focus();
 }
 
 // Sepete ürün ekle
-function addToCart(product) {
-    const existingItem = cart.find(item => item.barcode === product.barcode);
+function addToCart(barcode) {
+    const product = products.find(p => p.barcode === barcode);
+    if (!product) {
+        showStatus('Ürün bulunamadı!', 'error');
+        return;
+    }
     
+    if (product.stock <= 0) {
+        showStatus('Bu üründen stokta kalmadı!', 'error');
+        return;
+    }
+    
+    const existingItem = cart.find(item => item.barcode === barcode);
     if (existingItem) {
         if (existingItem.quantity >= product.stock) {
             showStatus('Stok yetersiz!', 'error');
@@ -1557,70 +1354,64 @@ function addToCart(product) {
             barcode: product.barcode,
             name: product.name,
             price: product.price,
-            quantity: 1,
-            kdv: product.kdv || 0
+            quantity: 1
         });
     }
     
     updateCartDisplay();
+    showStatus(`${product.name} sepete eklendi!`, 'success');
 }
 
-// Sepet görünümünü güncelle
+// Sepetten ürün çıkar
+function removeFromCart(barcode) {
+    const itemIndex = cart.findIndex(item => item.barcode === barcode);
+    if (itemIndex !== -1) {
+        const item = cart[itemIndex];
+        if (item.quantity > 1) {
+            item.quantity -= 1;
+        } else {
+            cart.splice(itemIndex, 1);
+        }
+        updateCartDisplay();
+    }
+}
+
+// Sepeti güncelle
 function updateCartDisplay() {
-    const cartItemsContainer = document.getElementById('cartItems');
-    const cartCount = document.getElementById('cartCount');
-    const subtotalElement = document.getElementById('subtotal');
-    const kdvAmountElement = document.getElementById('kdvAmount');
-    const totalAmountElement = document.getElementById('totalAmount');
+    const cartItems = document.getElementById('cartItems');
+    const cartTotal = document.getElementById('cartTotal');
+    const checkoutBtn = document.getElementById('checkoutBtn');
     
-    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
-    if (cartCount) cartCount.textContent = totalItems;
-    
-    if (!cartItemsContainer) return;
+    if (!cartItems || !cartTotal || !checkoutBtn) return;
     
     if (cart.length === 0) {
-        cartItemsContainer.innerHTML = `
-            <div class="empty-state">
+        cartItems.innerHTML = `
+            <div class="empty-cart">
                 <i class="fas fa-shopping-cart"></i>
                 <p>Sepet boş</p>
-                <small>Ürün eklemek için barkod okutun veya listeden seçin</small>
             </div>
         `;
-        
-        if (subtotalElement) subtotalElement.textContent = '0.00 TL';
-        if (kdvAmountElement) kdvAmountElement.textContent = '0.00 TL';
-        if (totalAmountElement) totalAmountElement.textContent = '0.00 TL';
+        cartTotal.textContent = '0.00 TL';
+        checkoutBtn.disabled = true;
         return;
     }
     
     let cartHTML = '';
-    let subtotal = 0;
-    let totalKdv = 0;
+    let total = 0;
     
     cart.forEach(item => {
         const itemTotal = item.price * item.quantity;
-        const itemKdv = (itemTotal * (item.kdv || 0)) / 100;
-        
-        subtotal += itemTotal;
-        totalKdv += itemKdv;
+        total += itemTotal;
         
         cartHTML += `
             <div class="cart-item">
-                <div class="item-info">
+                <div class="cart-item-info">
                     <h4>${item.name}</h4>
-                    <div class="item-details">
-                        <span class="price">${item.price.toFixed(2)} TL</span>
-                        <span class="barcode">${item.barcode}</span>
-                    </div>
+                    <p>${item.price.toFixed(2)} TL x ${item.quantity}</p>
                 </div>
-                <div class="item-controls">
-                    <div class="quantity-controls">
-                        <button class="btn-quantity" onclick="decreaseQuantity('${item.barcode}')">-</button>
-                        <span class="quantity">${item.quantity}</span>
-                        <button class="btn-quantity" onclick="increaseQuantity('${item.barcode}')">+</button>
-                    </div>
-                    <div class="item-total">${itemTotal.toFixed(2)} TL</div>
-                    <button class="btn-remove" onclick="removeFromCart('${item.barcode}')">
+                <div class="cart-item-actions">
+                    <span class="cart-item-total">${itemTotal.toFixed(2)} TL</span>
+                    <button class="btn-small btn-danger" onclick="removeFromCart('${item.barcode}')">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -1628,215 +1419,146 @@ function updateCartDisplay() {
         `;
     });
     
-    const total = subtotal + totalKdv;
-    
-    cartItemsContainer.innerHTML = cartHTML;
-    if (subtotalElement) subtotalElement.textContent = subtotal.toFixed(2) + ' TL';
-    if (kdvAmountElement) kdvAmountElement.textContent = totalKdv.toFixed(2) + ' TL';
-    if (totalAmountElement) totalAmountElement.textContent = total.toFixed(2) + ' TL';
-    
-    calculateChange();
-    saveToLocalStorage();
+    cartItems.innerHTML = cartHTML;
+    cartTotal.textContent = total.toFixed(2) + ' TL';
+    checkoutBtn.disabled = false;
 }
 
-// Miktar artır
-function increaseQuantity(barcode) {
-    const item = cart.find(i => i.barcode === barcode);
-    const product = products.find(p => p.barcode === barcode);
-    
-    if (item && product) {
-        if (item.quantity < product.stock) {
-            item.quantity += 1;
-            updateCartDisplay();
-        } else {
-            showStatus('Stok yetersiz!', 'error');
-        }
-    }
-}
-
-// Miktar azalt
-function decreaseQuantity(barcode) {
-    const item = cart.find(i => i.barcode === barcode);
-    
-    if (item) {
-        if (item.quantity > 1) {
-            item.quantity -= 1;
-        } else {
-            removeFromCart(barcode);
-            return;
-        }
-        updateCartDisplay();
-    }
-}
-
-// Sepetten ürün çıkar
-function removeFromCart(barcode) {
-    cart = cart.filter(item => item.barcode !== barcode);
-    updateCartDisplay();
-    showStatus('Ürün sepetten çıkarıldı!', 'info');
-}
-
-// Para üstü hesapla
-function calculateChange() {
-    const cashAmountElem = document.getElementById('cashAmount');
-    const cashAmount = parseFloat(cashAmountElem ? cashAmountElem.value : 0) || 0;
-    const totalAmountText = document.getElementById('totalAmount') ? document.getElementById('totalAmount').textContent : '0';
-    const totalAmount = parseFloat(totalAmountText.replace(' TL','')) || 0;
-    const changeDisplay = document.getElementById('changeDisplay');
-    
-    if (!changeDisplay) return;
-    
-    if (cashAmount >= totalAmount) {
-        const change = cashAmount - totalAmount;
-        changeDisplay.innerHTML = `Para Üstü: <span>${change.toFixed(2)} TL</span>`;
-    } else {
-        changeDisplay.innerHTML = `Para Üstü: <span>0.00 TL</span>`;
-    }
-}
-
-// Nakit input görünümünü değiştir
-function toggleCashInput() {
-    const pm = document.querySelector('input[name="paymentMethod"]:checked');
-    const paymentMethod = pm ? pm.value : 'nakit';
-    const cashInputSection = document.getElementById('cashInputSection');
-    
-    if (cashInputSection) {
-        if (paymentMethod === 'nakit') {
-            cashInputSection.style.display = 'block';
-        } else {
-            cashInputSection.style.display = 'none';
-        }
-    }
-}
-
-// Satışı tamamla - SUPABASE ENTEGRE
-async function completeSale() {
+// Ödeme modalını aç
+function openCheckoutModal() {
     if (cart.length === 0) {
         showStatus('Sepet boş!', 'error');
         return;
     }
     
-    const paymentMethodEl = document.querySelector('input[name="paymentMethod"]:checked');
-    const paymentMethod = paymentMethodEl ? paymentMethodEl.value : 'nakit';
-    const cashAmount = parseFloat(document.getElementById('cashAmount') ? document.getElementById('cashAmount').value : 0) || 0;
-    const totalAmount = parseFloat(document.getElementById('totalAmount') ? document.getElementById('totalAmount').textContent.replace(' TL','') : 0) || 0;
+    const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    document.getElementById('checkoutTotal').textContent = totalAmount.toFixed(2) + ' TL';
+    document.getElementById('cashAmount').value = '';
+    document.getElementById('changeAmount').textContent = '0.00 TL';
+    
+    openModal('checkoutModal');
+}
+
+// Para üstü hesapla
+function calculateChange() {
+    const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const cashAmount = parseFloat(document.getElementById('cashAmount').value) || 0;
+    const changeAmount = document.getElementById('changeAmount');
+    
+    if (cashAmount >= totalAmount) {
+        changeAmount.textContent = (cashAmount - totalAmount).toFixed(2) + ' TL';
+    } else {
+        changeAmount.textContent = '0.00 TL';
+    }
+}
+
+// Satışı tamamla
+async function completeSale() {
+    const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked').value;
+    const cashAmount = parseFloat(document.getElementById('cashAmount').value) || 0;
+    const totalAmount = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
     
     if (paymentMethod === 'nakit' && cashAmount < totalAmount) {
-        showStatus('Verilen para yetersiz!', 'error');
+        showStatus('Nakit miktarı yetersiz!', 'error');
         return;
     }
     
-    // Stokları güncelle
-    cart.forEach(cartItem => {
-        const product = products.find(p => p.barcode === cartItem.barcode);
-        if (product) {
-            product.stock -= cartItem.quantity;
-            if (product.stock < 0) product.stock = 0;
+    try {
+        // Stokları güncelle
+        cart.forEach(cartItem => {
+            const product = products.find(p => p.barcode === cartItem.barcode);
+            if (product) {
+                product.stock -= cartItem.quantity;
+                if (product.stock < 0) product.stock = 0;
+            }
+        });
+        
+        // Satış kaydı oluştur
+        const saleRecord = {
+            id: generateSaleId(),
+            timestamp: new Date().toISOString(),
+            items: [...cart],
+            totalAmount: totalAmount,
+            paymentMethod: paymentMethod,
+            cashAmount: paymentMethod === 'nakit' ? cashAmount : 0,
+            change: paymentMethod === 'nakit' ? (cashAmount - totalAmount) : 0,
+            user: currentUser.username
+        };
+        
+        salesHistory.push(saleRecord);
+        
+        // Kasa durumunu güncelle
+        if (cashRegister.isOpen) {
+            if (paymentMethod === 'nakit') {
+                cashRegister.cashSales += totalAmount;
+                cashRegister.currentBalance = cashRegister.openingBalance + cashRegister.cashSales;
+            } else {
+                cashRegister.cardSales += totalAmount;
+            }
         }
-    });
-    
-    // Satış geçmişine ekle
-    const saleRecord = {
-        id: Date.now(), // client-side id
-        timestamp: new Date().toISOString(),
-        items: JSON.parse(JSON.stringify(cart)),
-        totalAmount: totalAmount,
-        paymentMethod: paymentMethod,
-        cashAmount: cashAmount,
-        change: paymentMethod === 'nakit' ? (cashAmount - totalAmount) : 0,
-        user: currentUser ? currentUser.username : 'unknown'
-    };
-    
-    salesHistory.push(saleRecord);
-    
-    // Kasa kaydını güncelle
-    if (cashRegister.isOpen) {
-        if (paymentMethod === 'nakit') {
-            cashRegister.cashSales += totalAmount;
-        } else {
-            cashRegister.cardSales += totalAmount;
-        }
-        cashRegister.currentBalance = cashRegister.openingBalance + cashRegister.cashSales;
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
+        // Fiş yazdır (isteğe bağlı)
+        printReceipt(saleRecord);
+        
+        // Sepeti temizle ve modal'ı kapat
+        cart = [];
+        closeModal('checkoutModal');
+        updateCartDisplay();
+        refreshDashboard();
+        
+        showStatus('Satış başarıyla tamamlandı!', 'success');
+        
+    } catch (error) {
+        console.error('Satış tamamlama hatası:', error);
+        showStatus('Satış tamamlanırken hata oluştu!', 'error');
     }
-    
-    // Fiş oluştur
-    const receipt = generateReceipt(paymentMethod, cashAmount);
-    
-    // Sepeti temizle
-    cart = [];
-    updateCartDisplay();
-    
-    // Formu sıfırla
-    const cashEl = document.getElementById('cashAmount');
-    if (cashEl) cashEl.value = '';
-    const nakitRadio = document.querySelector('input[name="paymentMethod"][value="nakit"]');
-    if (nakitRadio) nakitRadio.checked = true;
-    toggleCashInput();
-    
-    // Dashboard'u yenile
-    refreshDashboard();
-    
-    // SUPABASE'e kaydet
-    await saveToSupabase();
-    
-    // Fiş göster
-    showReceipt(receipt);
-    
-    showStatus('Satış başarıyla tamamlandı!', 'success');
-    saveToLocalStorage();
 }
 
-// Fiş oluştur
-function generateReceipt(paymentMethod, cashAmount) {
-    const totalAmount = parseFloat(document.getElementById('totalAmount') ? document.getElementById('totalAmount').textContent.replace(' TL','') : 0) || 0;
-    const change = paymentMethod === 'nakit' ? (cashAmount - totalAmount) : 0;
-    
-    let receiptHTML = `
-        <div class="receipt">
+// Satış ID'si oluştur
+function generateSaleId() {
+    return Date.now();
+}
+
+// Fiş yazdır
+function printReceipt(sale) {
+    const receiptContent = `
+        <div class="receipt" id="receiptContent">
             <div class="receipt-header">
-                <h3>TEKEL MARKET</h3>
-                <p>POS Sistemi</p>
-            </div>
-            <div class="receipt-info">
-                <p>Fiş No: ${Date.now()}</p>
-                <p>Tarih: ${new Date().toLocaleString('tr-TR')}</p>
-                <p>Kasiyer: ${currentUser ? (currentUser.fullName || currentUser.username) : 'Bilinmiyor'}</p>
+                <h2>TEKEL POS</h2>
+                <p>Fiş No: ${sale.id}</p>
+                <p>${new Date(sale.timestamp).toLocaleString('tr-TR')}</p>
             </div>
             <div class="receipt-items">
-                <table>
-    `;
-    
-    // cart içeriği temiz olduğu için, satışlarda items olarak gönderilen satırı kullan
-    const lastSale = salesHistory[salesHistory.length - 1];
-    const itemsToShow = lastSale ? lastSale.items : [];
-    
-    itemsToShow.forEach(item => {
-        receiptHTML += `
-            <tr>
-                <td>${item.name} x${item.quantity}</td>
-                <td>${(item.price * item.quantity).toFixed(2)} TL</td>
-            </tr>
-        `;
-    });
-    
-    receiptHTML += `
-                </table>
+                ${sale.items.map(item => `
+                    <div class="receipt-item">
+                        <span>${item.name} x${item.quantity}</span>
+                        <span>${(item.price * item.quantity).toFixed(2)} TL</span>
+                    </div>
+                `).join('')}
             </div>
             <div class="receipt-totals">
-                <p>Ara Toplam: ${document.getElementById('subtotal') ? document.getElementById('subtotal').textContent : '0.00 TL'}</p>
-                <p>KDV Toplam: ${document.getElementById('kdvAmount') ? document.getElementById('kdvAmount').textContent : '0.00 TL'}</p>
-                <p><strong>Toplam: ${totalAmount.toFixed(2)} TL</strong></p>
-                <p>Ödeme: ${paymentMethod === 'nakit' ? 'Nakit' : 'Kredi Kartı'}</p>
-    `;
-    
-    if (paymentMethod === 'nakit') {
-        receiptHTML += `
-            <p>Verilen: ${cashAmount.toFixed(2)} TL</p>
-            <p>Para Üstü: ${change.toFixed(2)} TL</p>
-        `;
-    }
-    
-    receiptHTML += `
+                <div class="summary-row total">
+                    <span>TOPLAM:</span>
+                    <span>${sale.totalAmount.toFixed(2)} TL</span>
+                </div>
+                ${sale.paymentMethod === 'nakit' ? `
+                    <div class="summary-row">
+                        <span>Nakit:</span>
+                        <span>${sale.cashAmount.toFixed(2)} TL</span>
+                    </div>
+                    <div class="summary-row">
+                        <span>Para Üstü:</span>
+                        <span>${sale.change.toFixed(2)} TL</span>
+                    </div>
+                ` : `
+                    <div class="summary-row">
+                        <span>Kart:</span>
+                        <span>${sale.totalAmount.toFixed(2)} TL</span>
+                    </div>
+                `}
             </div>
             <div class="receipt-footer">
                 <p>Teşekkür Ederiz!</p>
@@ -1844,31 +1566,6 @@ function generateReceipt(paymentMethod, cashAmount) {
         </div>
     `;
     
-    return receiptHTML;
-}
-
-// Fiş göster
-function showReceipt(receiptHTML) {
-    const rc = document.getElementById('receiptContent');
-    if (rc) rc.innerHTML = receiptHTML;
-    openModal('receiptModal');
-}
-
-// Modal açma
-function openModal(modalId) {
-    const el = document.getElementById(modalId);
-    if (el) el.style.display = 'block';
-}
-
-// Modal kapama
-function closeModal(modalId) {
-    const el = document.getElementById(modalId);
-    if (el) el.style.display = 'none';
-}
-
-// Fiş yazdır
-function printReceipt() {
-    const receiptContent = document.getElementById('receiptContent') ? document.getElementById('receiptContent').innerHTML : '';
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
         <!DOCTYPE html>
@@ -1876,24 +1573,31 @@ function printReceipt() {
         <head>
             <title>Fiş Yazdır</title>
             <style>
-                body { font-family: Arial, sans-serif; font-size: 12px; }
+                body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
                 .receipt { width: 80mm; margin: 0 auto; }
                 .receipt-header { text-align: center; margin-bottom: 10px; }
-                .receipt-header h3 { margin: 0; font-size: 14px; }
-                .receipt-info p { margin: 2px 0; }
-                .receipt-items table { width: 100%; border-collapse: collapse; }
-                .receipt-items td { padding: 2px 0; border-bottom: 1px dashed #ccc; }
-                .receipt-totals { margin-top: 10px; border-top: 2px solid #000; padding-top: 5px; }
-                .receipt-totals p { margin: 3px 0; }
-                .receipt-footer { text-align: center; margin-top: 10px; font-style: italic; }
+                .receipt-header h2 { margin: 0; font-size: 18px; }
+                .receipt-item { display: flex; justify-content: space-between; margin: 5px 0; }
+                .receipt-totals { border-top: 1px dashed #000; margin-top: 10px; padding-top: 10px; }
+                .summary-row { display: flex; justify-content: space-between; margin: 5px 0; }
+                .summary-row.total { font-weight: bold; font-size: 16px; }
+                .receipt-footer { text-align: center; margin-top: 15px; font-style: italic; }
                 @media print {
                     body { margin: 0; padding: 0; }
-                    .receipt { width: 80mm !important; }
+                    .receipt { width: 100%; }
                 }
             </style>
         </head>
-        <body onload="window.print(); window.close();">
+        <body>
             ${receiptContent}
+            <script>
+                window.onload = function() {
+                    window.print();
+                    setTimeout(function() {
+                        window.close();
+                    }, 500);
+                }
+            </script>
         </body>
         </html>
     `);
@@ -1901,514 +1605,26 @@ function printReceipt() {
 }
 
 /* ======================================================
-   ÜRÜN YÖNETİMİ
+   MOBİL STOK EKLEME FONKSİYONLARI
    ====================================================== */
 
-// Ürünleri yükle (tablo)
-function loadProducts() {
-    const tableBody = document.getElementById('productsTableBody');
-    
-    if (!tableBody) return;
-    
-    if (products.length === 0) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="7" class="empty-state">
-                    <i class="fas fa-box-open"></i>
-                    <p>Henüz ürün eklenmemiş</p>
-                </td>
-            </tr>
-        `;
-        return;
-    }
-    
-    let tableHTML = '';
-    products.forEach(product => {
-        const status = getStockStatus(product);
-        tableHTML += `
-            <tr>
-                <td>${product.barcode}</td>
-                <td>${product.name}</td>
-                <td>${product.price.toFixed(2)} TL</td>
-                <td>${product.stock}</td>
-                <td>${product.minStock}</td>
-                <td><span class="status-badge ${status.class}">${status.text}</span></td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-small btn-primary" onclick="editProduct('${product.barcode}')">
-                            <i class="fas fa-edit"></i> Düzenle
-                        </button>
-                        <button class="btn-small btn-danger" onclick="deleteProduct('${product.barcode}')">
-                            <i class="fas fa-trash"></i> Sil
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    });
-    
-    tableBody.innerHTML = tableHTML;
-}
-
-// Ürün düzenle
-function editProduct(barcode) {
-    const product = products.find(p => p.barcode === barcode);
-    if (!product) {
-        showStatus('Ürün bulunamadı!', 'error');
-        return;
-    }
-    
-    editingProduct = product;
-    
-    // Modal formunu doldur
-    const elBarcode = document.getElementById('newProductBarcode');
-    const elName = document.getElementById('newProductName');
-    const elPrice = document.getElementById('newProductPrice');
-    const elQty = document.getElementById('newProductQuantity');
-    const elMin = document.getElementById('newProductMinStock');
-    const elKdv = document.getElementById('newProductKDV');
-    const elOtv = document.getElementById('newProductOTV');
-    if (elBarcode) elBarcode.value = product.barcode;
-    if (elName) elName.value = product.name;
-    if (elPrice) elPrice.value = product.price;
-    if (elQty) elQty.value = product.stock;
-    if (elMin) elMin.value = product.minStock;
-    if (elKdv) elKdv.value = product.kdv;
-    if (elOtv) elOtv.value = product.otv;
-    
-    // Modal başlığını değiştir
-    const hdr = document.querySelector('#addProductModal .modal-header h3');
-    if (hdr) hdr.innerHTML = '<i class="fas fa-edit"></i> Ürünü Düzenle';
-    
-    // Form submit event'ini güncelle
-    const form = document.getElementById('addProductForm');
-    if (form) form.onsubmit = updateProduct;
-    
-    openModal('addProductModal');
-}
-
-// Ürün güncelle
-async function updateProduct(event) {
-    event.preventDefault();
-    
-    if (!editingProduct) {
-        showStatus('Düzenlenecek ürün bulunamadı!', 'error');
-        return;
-    }
-    
-    const updatedProduct = {
-        barcode: document.getElementById('newProductBarcode').value,
-        name: document.getElementById('newProductName').value,
-        price: parseFloat(document.getElementById('newProductPrice').value),
-        stock: parseInt(document.getElementById('newProductQuantity').value),
-        minStock: parseInt(document.getElementById('newProductMinStock').value),
-        kdv: parseFloat(document.getElementById('newProductKDV').value),
-        otv: parseFloat(document.getElementById('newProductOTV').value)
-    };
-    
-    const index = products.findIndex(p => p.barcode === editingProduct.barcode);
-    if (index !== -1) {
-        products[index] = updatedProduct;
-    }
-    
-    allProducts = [...products];
-    
-    // SUPABASE'e kaydet
-    await saveToSupabase();
-    
-    closeModal('addProductModal');
-    loadProducts();
-    loadInventory();
-    refreshDashboard();
-    
-    const form = document.getElementById('addProductForm');
-    if (form) form.onsubmit = addNewProduct;
-    const hdr = document.querySelector('#addProductModal .modal-header h3');
-    if (hdr) hdr.innerHTML = '<i class="fas fa-plus-circle"></i> Yeni Ürün Ekle';
-    
-    editingProduct = null;
-    
-    showStatus('Ürün başarıyla güncellendi!', 'success');
-}
-
-// Ürün sil
-async function deleteProduct(barcode) {
-    const product = products.find(p => p.barcode === barcode);
-    if (!product) {
-        showStatus('Ürün bulunamadı!', 'error');
-        return;
-    }
-    
-    if (confirm(`"${product.name}" ürününü silmek istediğinizden emin misiniz? Bu işlem geri alınamaz!`)) {
-        products = products.filter(p => p.barcode !== barcode);
-        allProducts = [...products];
-        
-        // SUPABASE'e kaydet
-        await saveToSupabase();
-        
-        loadProducts();
-        loadInventory();
-        refreshDashboard();
-        showStatus('Ürün başarıyla silindi!', 'success');
-    }
-}
-
-// Stok durumu belirle
-function getStockStatus(product) {
-    if (!product) return { class: 'danger', text: 'Bilinmiyor' };
-    if (product.stock === 0) {
-        return { class: 'danger', text: 'Stokta Yok' };
-    } else if (product.stock <= product.minStock) {
-        return { class: 'warning', text: 'Az Stok' };
-    } else {
-        return { class: 'success', text: 'Stokta Var' };
-    }
-}
-
-// Yeni ürün modal'ını aç
-function openAddProductModal() {
-    const form = document.getElementById('addProductForm');
-    if (form) form.reset();
-    const hdr = document.querySelector('#addProductModal .modal-header h3');
-    if (hdr) hdr.innerHTML = '<i class="fas fa-plus-circle"></i> Yeni Ürün Ekle';
-    if (form) form.onsubmit = addNewProduct;
-    editingProduct = null;
-    openModal('addProductModal');
-}
-
-// Yeni ürün ekle
-async function addNewProduct(event) {
-    event.preventDefault();
-    
-    const newProduct = {
-        barcode: document.getElementById('newProductBarcode').value,
-        name: document.getElementById('newProductName').value,
-        price: parseFloat(document.getElementById('newProductPrice').value),
-        stock: parseInt(document.getElementById('newProductQuantity').value),
-        minStock: parseInt(document.getElementById('newProductMinStock').value),
-        kdv: parseFloat(document.getElementById('newProductKDV').value),
-        otv: parseFloat(document.getElementById('newProductOTV').value)
-    };
-    
-    if (products.find(p => p.barcode === newProduct.barcode)) {
-        showStatus('Bu barkoda sahip ürün zaten var!', 'error');
-        return;
-    }
-    
-    products.push(newProduct);
-    allProducts = [...products];
-    
-    await saveToSupabase();
-    
-    closeModal('addProductModal');
-    loadProducts();
-    loadInventory();
-    refreshDashboard();
-    showStatus('Ürün başarıyla eklendi!', 'success');
-}
-
-/* ======================================================
-   STOK YÖNETİMİ
-   ====================================================== */
-
-// Stok yönetimini yükle
-function loadInventory() {
-    const tableBody = document.getElementById('inventoryTableBody');
-    const statTotalProducts = document.getElementById('statTotalProducts');
-    const statInStock = document.getElementById('statInStock');
-    const statLowStock = document.getElementById('statLowStock');
-    const statOutOfStock = document.getElementById('statOutOfStock');
-    
-    if (statTotalProducts) statTotalProducts.textContent = products.length;
-    if (statInStock) statInStock.textContent = products.filter(p => p.stock > p.minStock).length;
-    if (statLowStock) statLowStock.textContent = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
-    if (statOutOfStock) statOutOfStock.textContent = products.filter(p => p.stock === 0).length;
-    
-    if (!tableBody) return;
-    
-    if (products.length === 0) {
-        tableBody.innerHTML = `
-            <tr>
-                <td colspan="7" class="empty-state">
-                    <i class="fas fa-warehouse"></i>
-                    <p>Stok bilgisi bulunamadı</p>
-                </td>
-            </tr>
-        `;
-        return;
-    }
-    
-    let tableHTML = '';
-    products.forEach(product => {
-        const status = getStockStatus(product);
-        tableHTML += `
-            <tr>
-                <td>${product.barcode}</td>
-                <td>${product.name}</td>
-                <td>${product.price.toFixed(2)} TL</td>
-                <td>${product.stock}</td>
-                <td>${product.minStock}</td>
-                <td><span class="status-badge ${status.class}">${status.text}</span></td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-small btn-success" onclick="quickAddStock('${product.barcode}')">
-                            <i class="fas fa-plus"></i> Stok Ekle
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    });
-    
-    tableBody.innerHTML = tableHTML;
-}
-
-// Hızlı stok ekle
-function quickAddStock(barcode) {
-    const quantity = prompt('Eklenecek miktarı girin:', '1');
-    if (quantity && !isNaN(quantity) && parseInt(quantity) > 0) {
-        addStock(barcode, parseInt(quantity));
-    }
-}
-
-// Stok ekle
-async function addStock(barcode, quantity = 1) {
-    const product = products.find(p => p.barcode === barcode);
-    if (product) {
-        product.stock += quantity;
-        await saveToSupabase();
-        loadInventory();
-        refreshDashboard();
-        showStatus(`${product.name} stok eklendi: +${quantity}`, 'success');
-    } else {
-        showStatus('Ürün bulunamadı!', 'error');
-    }
-}
-
-/* ======================================================
-   STOK HAREKET RAPORU
-   ====================================================== */
-
-// Stok hareket raporunu yükle
-function loadStockMovements() {
-    const stockReportBody = document.getElementById('stockReportBody');
-    if (!stockReportBody) return;
-
-    // Basit bir stok hareketi simülasyonu
-    // Gerçek uygulamada bu veriler SUPABASE'den gelecek
-    const stockMovements = generateStockMovements();
-    
-    if (stockMovements.length === 0) {
-        stockReportBody.innerHTML = `
-            <tr>
-                <td colspan="6" class="empty-state">
-                    <i class="fas fa-exchange-alt"></i>
-                    <p>Stok hareketi bulunamadı</p>
-                </td>
-            </tr>
-        `;
-        return;
-    }
-
-    let movementsHTML = '';
-    stockMovements.forEach(movement => {
-        movementsHTML += `
-            <tr>
-                <td>${movement.barcode}</td>
-                <td>${movement.productName}</td>
-                <td>${movement.date}</td>
-                <td><span class="status-badge ${movement.type === 'in' ? 'success' : 'danger'}">${movement.type === 'in' ? 'Giriş' : 'Çıkış'}</span></td>
-                <td>${movement.quantity}</td>
-                <td>${movement.user}</td>
-            </tr>
-        `;
-    });
-    
-    stockReportBody.innerHTML = movementsHTML;
-}
-
-// Örnek stok hareketi verisi oluştur
-function generateStockMovements() {
-    const movements = [];
-    const movementTypes = ['in', 'out'];
-    const users = ['admin', 'kasiyer1', 'personel1'];
-    
-    // Son 30 stok hareketi oluştur
-    for (let i = 0; i < 30; i++) {
-        const randomProduct = products[Math.floor(Math.random() * products.length)];
-        if (!randomProduct) continue;
-        
-        const movementType = movementTypes[Math.floor(Math.random() * movementTypes.length)];
-        const quantity = movementType === 'in' ? 
-            Math.floor(Math.random() * 20) + 1 : 
-            Math.floor(Math.random() * 5) + 1;
-        
-        const daysAgo = Math.floor(Math.random() * 30);
-        const date = new Date();
-        date.setDate(date.getDate() - daysAgo);
-        
-        movements.push({
-            barcode: randomProduct.barcode,
-            productName: randomProduct.name,
-            date: date.toLocaleDateString('tr-TR'),
-            type: movementType,
-            quantity: quantity,
-            user: users[Math.floor(Math.random() * users.length)]
-        });
-    }
-    
-    return movements.sort((a, b) => new Date(b.date) - new Date(a.date));
-}
-
-/* ======================================================
-   KASA İŞLEMLERİ
-   ====================================================== */
-
-// Kasa açma modal'ını aç
-function openCashRegisterModal() {
-    if (cashRegister.isOpen) {
-        showStatus('Kasa zaten açık!', 'warning');
-        return;
-    }
-    openModal('cashOpenModal');
-    const el = document.getElementById('openingBalanceInput');
-    if (el) el.focus();
-}
-
-// Kasa aç
-async function openCash() {
-    const openingBalance = parseFloat(document.getElementById('openingBalanceInput').value) || 0;
-    
-    cashRegister = {
-        ...cashRegister,
-        isOpen: true,
-        openingBalance: openingBalance,
-        currentBalance: openingBalance,
-        cashSales: 0,
-        cardSales: 0
-    };
-    
-    closeModal('cashOpenModal');
-    updateCashDisplay();
-    
-    // SUPABASE'e kaydet
-    await saveToSupabase();
-    
-    showStatus('Kasa açıldı!', 'success');
-    saveToLocalStorage();
-}
-
-// Kasa kapatma modal'ını aç
-function closeCashRegisterModal() {
-    if (!cashRegister.isOpen) {
-        showStatus('Kasa zaten kapalı!', 'warning');
-        return;
-    }
-    
-    const mo = document.getElementById('modalOpeningBalance');
-    const ms = document.getElementById('modalCashSales');
-    const me = document.getElementById('modalExpectedCash');
-    if (mo) mo.textContent = cashRegister.openingBalance.toFixed(2) + ' TL';
-    if (ms) ms.textContent = cashRegister.cashSales.toFixed(2) + ' TL';
-    if (me) me.textContent = (cashRegister.openingBalance + cashRegister.cashSales).toFixed(2) + ' TL';
-    
-    openModal('cashCloseModal');
-    const el = document.getElementById('closingBalanceInput');
-    if (el) el.focus();
-}
-
-// Kasa kapat
-async function closeCash() {
-    const closingBalance = parseFloat(document.getElementById('closingBalanceInput').value) || 0;
-    const expectedCash = cashRegister.openingBalance + cashRegister.cashSales;
-    const difference = closingBalance - expectedCash;
-    
-    cashRegister.isOpen = false;
-    
-    closeModal('cashCloseModal');
-    updateCashDisplay();
-    
-    // SUPABASE'e kaydet
-    await saveToSupabase();
-    
-    if (difference !== 0) {
-        showStatus(`Kasa kapatıldı! Fark: ${difference.toFixed(2)} TL`, difference > 0 ? 'success' : 'warning');
-    } else {
-        showStatus('Kasa kapatıldı!', 'success');
-    }
-    
-    saveToLocalStorage();
-}
-
-// Kasa farkını hesapla
-function calculateCashDifference() {
-    const closingBalance = parseFloat(document.getElementById('closingBalanceInput').value) || 0;
-    const expectedCash = cashRegister.openingBalance + cashRegister.cashSales;
-    const difference = closingBalance - expectedCash;
-    
-    const differenceElement = document.getElementById('differenceAmount');
-    if (!differenceElement) return;
-    differenceElement.textContent = difference.toFixed(2) + ' TL';
-    differenceElement.className = difference === 0 ? 'success' : difference > 0 ? 'warning' : 'danger';
-}
-
-// Kasa görünümünü güncelle
-function updateCashDisplay() {
-    const cashStatusBadge = document.getElementById('cashStatusBadge');
-    const currentCashAmount = document.getElementById('currentCashAmount');
-    const cashStatusIcon = document.getElementById('cashStatusIcon');
-    const cashStatusText = document.getElementById('cashStatusText');
-    const openCashBtn = document.getElementById('openCashBtn');
-    const closeCashBtn = document.getElementById('closeCashBtn');
-    
-    if (cashRegister.isOpen) {
-        if (cashStatusBadge) { cashStatusBadge.textContent = 'Açık'; cashStatusBadge.className = 'status-badge success'; }
-        if (currentCashAmount) currentCashAmount.textContent = cashRegister.currentBalance.toFixed(2) + ' TL';
-        if (cashStatusIcon) cashStatusIcon.className = 'fas fa-lock-open';
-        if (cashStatusText) cashStatusText.textContent = 'Açık';
-        if (openCashBtn) openCashBtn.style.display = 'none';
-        if (closeCashBtn) closeCashBtn.style.display = 'block';
-    } else {
-        if (cashStatusBadge) { cashStatusBadge.textContent = 'Kapalı'; cashStatusBadge.className = 'status-badge danger'; }
-        if (currentCashAmount) currentCashAmount.textContent = '0.00 TL';
-        if (cashStatusIcon) cashStatusIcon.className = 'fas fa-lock';
-        if (cashStatusText) cashStatusText.textContent = 'Kapalı';
-        if (openCashBtn) openCashBtn.style.display = 'block';
-        if (closeCashBtn) closeCashBtn.style.display = 'none';
-    }
-}
-
-// Kasa durumunu yükle
-function loadCashStatus() {
-    updateCashDisplay();
-    
-    const ob = document.getElementById('openingBalance');
-    const tsa = document.getElementById('totalSalesAmount');
-    const cs = document.getElementById('cashSalesAmount');
-    const crd = document.getElementById('cardSalesAmount');
-    const exp = document.getElementById('expectedCash');
-    if (ob) ob.textContent = cashRegister.openingBalance.toFixed(2) + ' TL';
-    if (tsa) tsa.textContent = (cashRegister.cashSales + cashRegister.cardSales).toFixed(2) + ' TL';
-    if (cs) cs.textContent = cashRegister.cashSales.toFixed(2) + ' TL';
-    if (crd) crd.textContent = cashRegister.cardSales.toFixed(2) + ' TL';
-    if (exp) exp.textContent = (cashRegister.openingBalance + cashRegister.cashSales).toFixed(2) + ' TL';
-}
-
-/* ======================================================
-   MOBİL STOK & KAMERA
-   ====================================================== */
-
-// Kamera aç
+// Kamera başlatma
 async function startCamera() {
-    const startCameraBtn = document.getElementById('startCameraBtn');
-    const stopCameraBtn = document.getElementById('stopCameraBtn');
+    if (isCameraActive) {
+        console.log('Kamera zaten aktif');
+        return;
+    }
+    
+    const scannerContainer = document.getElementById('scannerContainer');
     const cameraPreview = document.getElementById('cameraPreview');
-    const scanResult = document.getElementById('scanResult');
+    
+    if (!scannerContainer || !cameraPreview) {
+        showStatus('Kamera bileşenleri bulunamadı!', 'error');
+        return;
+    }
     
     try {
-        stopCamera();
-        
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+        cameraStream = await navigator.mediaDevices.getUserMedia({ 
             video: { 
                 facingMode: 'environment',
                 width: { ideal: 1280 },
@@ -2416,110 +1632,63 @@ async function startCamera() {
             } 
         });
         
-        cameraStream = stream;
-        const videoElement = document.getElementById('videoElement');
-        if (videoElement) videoElement.srcObject = stream;
-        
-        videoElement && (videoElement.onloadedmetadata = function() {
-            initializeQuagga();
-        });
-        
+        cameraPreview.srcObject = cameraStream;
         isCameraActive = true;
-        lastDetectedBarcode = null;
-        lastDetectionTime = 0;
         
-        if (startCameraBtn) startCameraBtn.style.display = 'none';
-        if (stopCameraBtn) stopCameraBtn.style.display = 'inline-block';
-        if (cameraPreview) cameraPreview.style.display = 'block';
-        if (scanResult) scanResult.innerHTML = `
-            <div class="scanning-state">
-                <i class="fas fa-camera"></i>
-                <p>Kamera açıldı. Barkodu kameraya gösterin...</p>
-                <div class="scanning-animation"></div>
-                <p class="scanning-hint">Barkod kameranın odak noktasına getirin</p>
-            </div>
-        `;
+        // Quagga barkod okuyucuyu başlat
+        if (!quaggaInitialized) {
+            initializeQuagga();
+        }
         
-        showStatus('Kamera başarıyla açıldı! Barkod tarama aktif.', 'success');
+        showStatus('Kamera başlatıldı!', 'success');
         
     } catch (error) {
-        console.error('Kamera açılamadı:', error);
-        handleCameraError(error);
+        console.error('Kamera başlatma hatası:', error);
+        showStatus('Kamera başlatılamadı!', 'error');
     }
 }
 
-function handleCameraError(error) {
-    const startCameraBtn = document.getElementById('startCameraBtn');
-    const stopCameraBtn = document.getElementById('stopCameraBtn');
-    const cameraPreview = document.getElementById('cameraPreview');
-    const scanResult = document.getElementById('scanResult');
+// Kamera durdurma
+function stopCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+    }
     
-    showStatus('Kamera açılamadı! Demo moda geçiliyor.', 'error');
-    
-    if (startCameraBtn) startCameraBtn.style.display = 'none';
-    if (stopCameraBtn) stopCameraBtn.style.display = 'inline-block';
-    if (cameraPreview) cameraPreview.style.display = 'block';
-    if (scanResult) scanResult.innerHTML = `
-        <div class="demo-scanning">
-            <i class="fas fa-mobile-alt"></i>
-            <h3>Demo Mod Aktif</h3>
-            <p>Kamera erişimi sağlanamadı. Manuel barkod girişi yapabilirsiniz.</p>
-            
-            <div class="demo-barcodes">
-                <p><strong>Örnek barkodlar:</strong></p>
-                <div class="barcode-list">
-                    <div class="barcode-option" onclick="setBarcodeInput('8691234567890')">
-                        <i class="fas fa-barcode"></i> 8691234567890 - Marlboro Red
-                    </div>
-                    <div class="barcode-option" onclick="setBarcodeInput('8691234567891')">
-                        <i class="fas fa-barcode"></i> 8691234567891 - Marlboro Gold
-                    </div>
-                    <div class="barcode-option" onclick="setBarcodeInput('8691234567892')">
-                        <i class="fas fa-barcode"></i> 8691234567892 - Camel Yellow
-                    </div>
-                    <div class="barcode-option" onclick="setBarcodeInput('8691234567893')">
-                        <i class="fas fa-barcode"></i> 8691234567893 - Winston Blue
-                    </div>
-                </div>
-            </div>
-            
-            <div class="manual-input-section">
-                <h4>Manuel Barkod Girişi</h4>
-                <div class="input-group">
-                    <input type="text" id="manualBarcodeInput" placeholder="Barkod numarası girin" class="form-input">
-                    <button class="btn-primary" onclick="useManualBarcode()">
-                        <i class="fas fa-check"></i> Tara
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
+    if (isCameraActive) {
+        const cameraPreview = document.getElementById('cameraPreview');
+        if (cameraPreview) {
+            cameraPreview.srcObject = null;
+        }
+        
+        // Quagga'yı durdur
+        if (quaggaInitialized) {
+            try {
+                Quagga.stop();
+            } catch (e) {
+                console.log('Quagga durdurma hatası:', e);
+            }
+        }
+        
+        isCameraActive = false;
+        quaggaInitialized = false;
+        
+        console.log('Kamera durduruldu');
+    }
 }
 
-// Quagga init
+// Quagga barkod okuyucuyu başlat
 function initializeQuagga() {
-    return new Promise((resolve, reject) => {
-        if (quaggaInitialized) {
-            console.log('Quagga zaten başlatılmış, yeniden başlatılıyor...');
-            Quagga.stop();
-            quaggaInitialized = false;
-        }
-
+    if (quaggaInitialized) return;
+    
+    try {
         Quagga.init({
             inputStream: {
                 name: "Live",
                 type: "LiveStream",
-                target: document.querySelector('#videoElement'),
+                target: document.getElementById('cameraPreview'),
                 constraints: {
-                    width: 640,
-                    height: 480,
                     facingMode: "environment"
-                },
-                area: {
-                    top: "0%",
-                    right: "0%",
-                    left: "0%",
-                    bottom: "0%"
                 }
             },
             decoder: {
@@ -2530,392 +1699,560 @@ function initializeQuagga() {
                     "code_39_reader",
                     "upc_reader",
                     "upc_e_reader"
-                ],
-                multiple: false
+                ]
             },
-            locator: {
-                patchSize: "medium",
-                halfSample: true
-            },
-            locate: true,
-            numOfWorkers: navigator.hardwareConcurrency || 2
+            locate: true
         }, function(err) {
             if (err) {
-                console.error("Quagga başlatılamadı:", err);
-                reject(err);
+                console.error("Quagga başlatma hatası:", err);
+                showStatus('Barkod okuyucu başlatılamadı!', 'error');
                 return;
             }
             
-            quaggaInitialized = true;
-            console.log("Quagga başarıyla başlatıldı");
-            
-            Quagga.onDetected(function(result) {
-                if (result.codeResult && result.codeResult.code) {
-                    const detectedBarcode = result.codeResult.code;
-                    if (detectedBarcode.length >= 8) {
-                        handleBarcodeDetection(detectedBarcode);
-                    }
-                }
-            });
-            
-            Quagga.onProcessed(function(result) {
-                if (result) {
-                    drawScanningLine(result);
-                }
-            });
-            
             Quagga.start();
-            resolve();
+            quaggaInitialized = true;
+            console.log('Quagga barkod okuyucu başlatıldı');
         });
-    });
+        
+        Quagga.onDetected(function(result) {
+            const code = result.codeResult.code;
+            const currentTime = Date.now();
+            
+            // Aynı barkodun tekrar tekrar okunmasını önle (1 saniye içinde)
+            if (code === lastDetectedBarcode && (currentTime - lastDetectionTime) < 1000) {
+                return;
+            }
+            
+            lastDetectedBarcode = code;
+            lastDetectionTime = currentTime;
+            
+            console.log('Barkod okundu:', code);
+            handleBarcodeDetection(code);
+        });
+        
+    } catch (error) {
+        console.error('Quagga initialization error:', error);
+    }
 }
 
-function drawScanningLine(result) {
-    const canvas = document.querySelector('canvas.drawingBuffer');
-    if (!canvas || !result.box) return;
-    
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, canvas.height / 2);
-    ctx.lineTo(canvas.width, canvas.height / 2);
-    ctx.stroke();
-}
-
+// Barkod okunduğunda yapılacak işlem
 function handleBarcodeDetection(barcode) {
-    if (!isCameraActive) return;
-    
-    const now = Date.now();
-    if (lastDetectedBarcode === barcode && now - lastDetectionTime < 3000) {
-        return;
+    // Barkod input'una yaz
+    const quickBarcodeInput = document.getElementById('quickBarcodeInput');
+    if (quickBarcodeInput) {
+        quickBarcodeInput.value = barcode;
     }
     
-    lastDetectedBarcode = barcode;
-    lastDetectionTime = now;
-    
-    if (barcodeDetectionTimeout) {
-        clearTimeout(barcodeDetectionTimeout);
-    }
-    
-    barcodeDetectionTimeout = setTimeout(() => {
-        lastDetectedBarcode = null;
-    }, 3000);
-    
-    const scanResult = document.getElementById('scanResult');
-    
-    const quick = document.getElementById('quickBarcodeInput');
-    const bf = document.getElementById('barcodeFieldMobile');
-    const sb = document.getElementById('scannedBarcodeMobile');
-    if (quick) quick.value = barcode;
-    if (bf) bf.value = barcode;
-    if (sb) sb.value = barcode;
-    
+    // Hızlı stok ekleme modalını aç
+    openQuickStockModal(barcode);
+}
+
+// Hızlı stok ekleme modalını aç
+function openQuickStockModal(barcode) {
     const product = products.find(p => p.barcode === barcode);
     
+    document.getElementById('quickBarcodeInput').value = barcode;
+    
     if (product) {
-        if (scanResult) scanResult.innerHTML = `
-            <div class="scan-success">
-                <i class="fas fa-check-circle"></i>
-                <h3>Ürün Bulundu!</h3>
-                <div class="product-info">
-                    <strong>${product.name}</strong>
-                    <p>Barkod: ${barcode}</p>
-                    <p>Mevcut Stok: ${product.stock}</p>
-                </div>
-                <div class="scan-actions">
-                    <button class="btn-success" onclick="quickStockAdd()">
-                        <i class="fas fa-plus"></i> Hızlı Stok Ekle
-                    </button>
-                    <button class="btn-primary" onclick="resetScanner()">
-                        <i class="fas fa-redo"></i> Yeni Barkod Tara
-                    </button>
-                </div>
+        document.getElementById('quickProductInfo').innerHTML = `
+            <div class="product-match">
+                <h4>${product.name}</h4>
+                <p>Mevcut Stok: ${product.stock}</p>
+                <p>Fiyat: ${product.price.toFixed(2)} TL</p>
             </div>
         `;
     } else {
-        if (scanResult) scanResult.innerHTML = `
-            <div class="scan-warning">
-                <i class="fas fa-exclamation-triangle"></i>
-                <h3>Ürün Bulunamadı</h3>
-                <div class="product-info">
-                    <p>Barkod: ${barcode}</p>
-                    <p>Bu barkoda sahip ürün bulunamadı. Yeni ürün ekleyin.</p>
-                </div>
-                <div class="scan-actions">
-                    <button class="btn-primary" onclick="showNewProductForm()">
-                        <i class="fas fa-plus-circle"></i> Yeni Ürün Ekle
-                    </button>
-                    <button class="btn-secondary" onclick="resetScanner()">
-                        <i class="fas fa-redo"></i> Yeni Barkod Tara
-                    </button>
-                </div>
+        document.getElementById('quickProductInfo').innerHTML = `
+            <div class="product-no-match">
+                <p><i class="fas fa-exclamation-triangle"></i> Yeni ürün</p>
+                <p>Bu barkod ile kayıtlı ürün bulunamadı</p>
             </div>
         `;
     }
     
-    const manualForm = document.getElementById('manualProductForm');
-    if (manualForm) manualForm.style.display = 'block';
-    
-    showStatus(`Barkod okundu: ${barcode}`, 'success');
+    document.getElementById('quickStockAmount').value = '1';
+    openModal('quickStockModal');
 }
 
-function showNewProductForm() {
-    const manualForm = document.getElementById('manualProductForm');
-    if (manualForm) manualForm.style.display = 'block';
-    const pn = document.getElementById('productNameMobile');
-    if (pn) pn.focus();
-}
-
-function resetScanner() {
-    lastDetectedBarcode = null;
-    lastDetectionTime = 0;
-    
-    const scanResult = document.getElementById('scanResult');
-    if (scanResult) scanResult.innerHTML = `
-        <div class="scanning-state">
-            <i class="fas fa-camera"></i>
-            <p>Kamera hazır. Yeni barkodu tarayın...</p>
-            <div class="scanning-animation"></div>
-        </div>
-    `;
-    
-    const quick = document.getElementById('quickBarcodeInput');
-    const bf = document.getElementById('barcodeFieldMobile');
-    const sb = document.getElementById('scannedBarcodeMobile');
-    if (quick) quick.value = '';
-    if (bf) bf.value = '';
-    if (sb) sb.value = '';
-    
-    const manualForm = document.getElementById('manualProductForm');
-    if (manualForm) manualForm.style.display = 'none';
-    
-    showStatus('Tarayıcı sıfırlandı. Yeni barkod tarayabilirsiniz.', 'info');
-}
-
-function setBarcodeInput(barcode) {
-    const mb = document.getElementById('manualBarcodeInput');
-    if (mb) mb.value = barcode;
-}
-
-function useManualBarcode() {
-    const barcode = document.getElementById('manualBarcodeInput') ? document.getElementById('manualBarcodeInput').value.trim() : '';
-    if (barcode) {
-        handleBarcodeDetection(barcode);
-    } else {
-        showStatus('Lütfen barkod girin!', 'error');
-    }
-}
-
-function stopCamera() {
-    if (quaggaInitialized) {
-        Quagga.stop();
-        quaggaInitialized = false;
-    }
-    
-    if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-    }
-    
-    isCameraActive = false;
-    lastDetectedBarcode = null;
-    lastDetectionTime = 0;
-    
-    if (barcodeDetectionTimeout) {
-        clearTimeout(barcodeDetectionTimeout);
-        barcodeDetectionTimeout = null;
-    }
-    
-    const startCameraBtn = document.getElementById('startCameraBtn');
-    const stopCameraBtn = document.getElementById('stopCameraBtn');
-    const cameraPreview = document.getElementById('cameraPreview');
-    const scanResult = document.getElementById('scanResult');
-    if (startCameraBtn) startCameraBtn.style.display = 'inline-block';
-    if (stopCameraBtn) stopCameraBtn.style.display = 'none';
-    if (cameraPreview) cameraPreview.style.display = 'none';
-    if (scanResult) scanResult.innerHTML = `
-        <div class="empty-state">
-            <i class="fas fa-barcode"></i>
-            <p>Kamerayı açıp barkod tarayın</p>
-        </div>
-    `;
-    
-    const quick = document.getElementById('quickBarcodeInput');
-    if (quick) quick.value = '';
-    const manualForm = document.getElementById('manualProductForm');
-    if (manualForm) manualForm.style.display = 'none';
-    
-    showStatus('Kamera kapatıldı.', 'info');
-}
-
-// Hızlı stok ekle
+// Hızlı stok ekleme işlemi
 async function quickStockAdd() {
-    const barcodeInput = document.getElementById('quickBarcodeInput');
-    const quantityInput = document.getElementById('quickStockQuantity');
-    
-    const barcode = barcodeInput ? barcodeInput.value.trim() : '';
-    const quantity = parseInt(quantityInput ? quantityInput.value : '1') || 1;
+    const barcode = document.getElementById('quickBarcodeInput').value.trim();
+    const amount = parseInt(document.getElementById('quickStockAmount').value) || 0;
     
     if (!barcode) {
-        showStatus('Lütfen barkod girin veya tarayın!', 'error');
+        showStatus('Barkod gerekli!', 'error');
         return;
     }
     
-    const product = products.find(p => p.barcode === barcode);
+    if (amount <= 0) {
+        showStatus('Geçerli bir miktar giriniz!', 'error');
+        return;
+    }
     
-    if (product) {
-        product.stock += quantity;
+    try {
+        let product = products.find(p => p.barcode === barcode);
+        
+        if (product) {
+            // Mevcut ürün - stok güncelle
+            product.stock += amount;
+            showStatus(`${product.name} stoğuna ${amount} adet eklendi!`, 'success');
+        } else {
+            // Yeni ürün - ekle
+            const productName = prompt('Yeni ürün adını giriniz:');
+            if (!productName) {
+                showStatus('Ürün adı gerekli!', 'error');
+                return;
+            }
+            
+            const productPrice = parseFloat(prompt('Ürün fiyatını giriniz (TL):')) || 0;
+            if (productPrice <= 0) {
+                showStatus('Geçerli bir fiyat giriniz!', 'error');
+                return;
+            }
+            
+            product = {
+                barcode: barcode,
+                name: productName,
+                price: productPrice,
+                stock: amount,
+                minStock: 5,
+                kdv: 18,
+                otv: 0
+            };
+            
+            products.push(product);
+            showStatus('Yeni ürün eklendi ve stoğu güncellendi!', 'success');
+        }
+        
+        // SUPABASE'e kaydet
         await saveToSupabase();
-        loadInventory();
+        
+        closeModal('quickStockModal');
         refreshDashboard();
-        showStatus(`${product.name} stok eklendi: +${quantity} (Toplam: ${product.stock})`, 'success');
-        resetScanner();
-        if (quantityInput) quantityInput.value = '1';
-    } else {
-        const bf = document.getElementById('barcodeFieldMobile');
-        const sb = document.getElementById('scannedBarcodeMobile');
-        if (bf) bf.value = barcode;
-        if (sb) sb.value = barcode;
-        const manualForm = document.getElementById('manualProductForm');
-        if (manualForm) manualForm.style.display = 'block';
-        showStatus('Bu barkoda sahip ürün bulunamadı. Lütfen ürün bilgilerini girin.', 'warning');
+        
+        // Barkod input'unu temizle
+        const quickBarcodeInput = document.getElementById('quickBarcodeInput');
+        if (quickBarcodeInput) quickBarcodeInput.value = '';
+        
+    } catch (error) {
+        console.error('Hızlı stok ekleme hatası:', error);
+        showStatus('Stok eklenirken hata oluştu!', 'error');
     }
-}
-
-// Mobil'den yeni ürün ekle
-async function addNewProductFromMobile(event) {
-    event.preventDefault();
-    
-    const newProduct = {
-        barcode: document.getElementById('barcodeFieldMobile').value,
-        name: document.getElementById('productNameMobile').value,
-        price: parseFloat(document.getElementById('productPriceMobile').value),
-        stock: parseInt(document.getElementById('productQuantityMobile').value),
-        minStock: parseInt(document.getElementById('productMinStockMobile').value),
-        kdv: parseFloat(document.getElementById('productKDVMobile').value),
-        otv: parseFloat(document.getElementById('productOTVMobile').value)
-    };
-    
-    if (products.find(p => p.barcode === newProduct.barcode)) {
-        showStatus('Bu barkoda sahip ürün zaten var!', 'error');
-        return;
-    }
-    
-    products.push(newProduct);
-    allProducts = [...products];
-    
-    await saveToSupabase();
-    
-    resetScanner();
-    const mobileForm = document.getElementById('mobileProductForm');
-    if (mobileForm) mobileForm.reset();
-    const quickQty = document.getElementById('quickStockQuantity');
-    if (quickQty) quickQty.value = '1';
-    
-    loadProducts();
-    loadInventory();
-    refreshDashboard();
-    
-    showStatus('Ürün başarıyla eklendi ve stok güncellendi!', 'success');
 }
 
 /* ======================================================
-   ADMIN PANELİ
+   RAPORLAR FONKSİYONLARI
    ====================================================== */
 
-// Admin verilerini yükle
-function loadAdminData() {
-    const tu = document.getElementById('totalUsers');
-    const ts = document.getElementById('totalSales');
-    const tr = document.getElementById('totalRevenue');
-    if (tu) tu.textContent = '3';
-    if (ts) ts.textContent = salesHistory.length;
-    if (tr) tr.textContent = salesHistory.reduce((sum, sale) => sum + (sale.totalAmount || 0), 0).toFixed(2) + ' TL';
-    loadUsers();
-}
-
-// Kullanıcıları yükle
-function loadUsers() {
-    const usersTableBody = document.getElementById('usersTableBody');
-    if (!usersTableBody) return;
+// Raporları yükle
+function loadReports(period = 'today') {
+    console.log('Raporlar yükleniyor, periyot:', period);
     
-    // Demo kullanıcılar
-    const users = [
-        { username: 'admin', fullName: 'Sistem Yöneticisi', role: 'admin', lastLogin: '2024-01-15 14:30' },
-        { username: 'kasiyer1', fullName: 'Ahmet Yılmaz', role: 'cashier', lastLogin: '2024-01-15 13:45' },
-        { username: 'personel1', fullName: 'Ayşe Demir', role: 'user', lastLogin: '2024-01-15 12:20' }
-    ];
+    const reportSummary = document.getElementById('reportSummary');
+    const salesReport = document.getElementById('salesReport');
     
-    let tableHTML = '';
-    users.forEach(user => {
-        tableHTML += `
-            <tr>
-                <td>${user.username}</td>
-                <td>${user.fullName}</td>
-                <td>${getRoleText(user.role)}</td>
-                <td>${user.lastLogin}</td>
-                <td>
-                    <div class="action-buttons">
-                        <button class="btn-small btn-primary">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn-small btn-danger">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </td>
-            </tr>
-        `;
+    if (!reportSummary || !salesReport) return;
+    
+    // Periyodu aktif yap
+    document.querySelectorAll('.report-period-btn').forEach(btn => {
+        btn.classList.remove('active');
     });
+    document.querySelector(`[data-period="${period}"]`).classList.add('active');
     
-    usersTableBody.innerHTML = tableHTML;
-}
-
-// Yeni kullanıcı modal'ını aç
-function openAddUserModal() {
-    const form = document.getElementById('addUserForm');
-    if (form) form.reset();
-    openModal('addUserModal');
-}
-
-// Yeni kullanıcı oluştur
-function createNewUser(event) {
-    event.preventDefault();
+    // Satışları filtrele
+    const filteredSales = filterSalesByPeriod(period);
     
-    const password = document.getElementById('newPassword').value;
-    const passwordConfirm = document.getElementById('newPasswordConfirm').value;
+    // Özet bilgileri hesapla
+    const summary = calculateReportSummary(filteredSales);
     
-    if (password !== passwordConfirm) {
-        showStatus('Şifreler eşleşmiyor!', 'error');
+    // Özeti göster
+    reportSummary.innerHTML = `
+        <div class="summary-card">
+            <div class="summary-icon total-sales">
+                <i class="fas fa-chart-line"></i>
+            </div>
+            <div class="summary-info">
+                <h3>${summary.totalSales.toFixed(2)} TL</h3>
+                <p>Toplam Ciro</p>
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-icon transaction-count">
+                <i class="fas fa-receipt"></i>
+            </div>
+            <div class="summary-info">
+                <h3>${summary.transactionCount}</h3>
+                <p>Toplam İşlem</p>
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-icon cash-sales">
+                <i class="fas fa-money-bill-wave"></i>
+            </div>
+            <div class="summary-info">
+                <h3>${summary.cashSales.toFixed(2)} TL</h3>
+                <p>Nakit Satış</p>
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-icon card-sales">
+                <i class="fas fa-credit-card"></i>
+            </div>
+            <div class="summary-info">
+                <h3>${summary.cardSales.toFixed(2)} TL</h3>
+                <p>Kartlı Satış</p>
+            </div>
+        </div>
+    `;
+    
+    // Satış detaylarını göster
+    if (filteredSales.length === 0) {
+        salesReport.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-chart-bar"></i>
+                <p>Bu periyotta satış bulunamadı</p>
+            </div>
+        `;
         return;
     }
     
-    showStatus('Kullanıcı başarıyla oluşturuldu!', 'success');
-    closeModal('addUserModal');
-}
-
-// Admin sekmesi aç
-function openAdminTab(tabName) {
-    const adminTabBtns = document.querySelectorAll('.admin-tab-btn');
-    adminTabBtns.forEach(btn => {
-        btn.classList.remove('active');
+    let salesHTML = `
+        <div class="sales-report-header">
+            <div class="report-column">Tarih</div>
+            <div class="report-column">Fiş No</div>
+            <div class="report-column">Tutar</div>
+            <div class="report-column">Ödeme</div>
+            <div class="report-column">Kasiyer</div>
+            <div class="report-column">İşlemler</div>
+        </div>
+    `;
+    
+    filteredSales.forEach(sale => {
+        const saleDate = new Date(sale.timestamp).toLocaleString('tr-TR');
+        salesHTML += `
+            <div class="sales-report-row">
+                <div class="report-column">${saleDate}</div>
+                <div class="report-column">${sale.id}</div>
+                <div class="report-column">${(sale.totalAmount || 0).toFixed(2)} TL</div>
+                <div class="report-column">
+                    <span class="payment-badge ${sale.paymentMethod === 'nakit' ? 'cash' : 'card'}">
+                        ${sale.paymentMethod === 'nakit' ? 'Nakit' : 'Kart'}
+                    </span>
+                </div>
+                <div class="report-column">${sale.user || 'Bilinmiyor'}</div>
+                <div class="report-column">
+                    <div class="action-buttons">
+                        <button class="btn-small btn-info" onclick="viewSaleDetails(${sale.id})" title="Detayları Görüntüle">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        ${currentUser && currentUser.role === 'admin' ? `
+                            <button class="btn-small btn-warning" onclick="openSaleEditModal(${sale.id})" title="Satışı Düzenle">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-small btn-danger" onclick="openSaleDeleteModal(${sale.id})" title="Satışı Sil">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
     });
     
-    const adminTabContents = document.querySelectorAll('.admin-tab-content');
-    adminTabContents.forEach(tab => {
+    salesReport.innerHTML = salesHTML;
+    console.log('Raporlar başarıyla yüklendi:', filteredSales.length, 'satış');
+}
+
+// Periyoda göre satışları filtrele
+function filterSalesByPeriod(period) {
+    const now = new Date();
+    let startDate;
+    
+    switch (period) {
+        case 'today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            break;
+        case 'yesterday':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+            break;
+        case 'week':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+            break;
+        case 'month':
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            break;
+        default:
+            startDate = new Date(0); // Tüm zamanlar
+    }
+    
+    return salesHistory.filter(sale => {
+        const saleDate = new Date(sale.timestamp);
+        return saleDate >= startDate;
+    });
+}
+
+// Rapor özetini hesapla
+function calculateReportSummary(sales) {
+    const summary = {
+        totalSales: 0,
+        transactionCount: sales.length,
+        cashSales: 0,
+        cardSales: 0
+    };
+    
+    sales.forEach(sale => {
+        summary.totalSales += sale.totalAmount || 0;
+        
+        if (sale.paymentMethod === 'nakit') {
+            summary.cashSales += sale.totalAmount || 0;
+        } else {
+            summary.cardSales += sale.totalAmount || 0;
+        }
+    });
+    
+    return summary;
+}
+
+// Stok hareketlerini yükle
+function loadStockMovements() {
+    const stockMovementsContainer = document.getElementById('stockMovements');
+    if (!stockMovementsContainer) return;
+    
+    // Bu fonksiyon stok hareketlerini gösterir
+    // Gerçek implementasyonda stok hareketleri kaydı tutulmalı
+    stockMovementsContainer.innerHTML = `
+        <div class="empty-state">
+            <i class="fas fa-exchange-alt"></i>
+            <p>Stok hareketi kaydı henüz aktif değil</p>
+        </div>
+    `;
+}
+
+/* ======================================================
+   KASA YÖNETİMİ FONKSİYONLARI
+   ====================================================== */
+
+// Kasa durumunu yükle
+function loadCashStatus() {
+    const cashStatus = document.getElementById('cashStatus');
+    const openCashBtn = document.getElementById('openCashBtn');
+    const closeCashBtn = document.getElementById('closeCashBtn');
+    
+    if (!cashStatus || !openCashBtn || !closeCashBtn) return;
+    
+    if (cashRegister.isOpen) {
+        cashStatus.innerHTML = `
+            <div class="cash-status-open">
+                <div class="status-indicator open"></div>
+                <div class="status-info">
+                    <h3>Kasa Açık</h3>
+                    <p>Açılış Bakiyesi: ${cashRegister.openingBalance.toFixed(2)} TL</p>
+                    <p>Nakit Satış: ${cashRegister.cashSales.toFixed(2)} TL</p>
+                    <p>Kartlı Satış: ${cashRegister.cardSales.toFixed(2)} TL</p>
+                    <p class="current-balance">Mevcut Bakiye: ${cashRegister.currentBalance.toFixed(2)} TL</p>
+                </div>
+            </div>
+        `;
+        openCashBtn.style.display = 'none';
+        closeCashBtn.style.display = 'block';
+    } else {
+        cashStatus.innerHTML = `
+            <div class="cash-status-closed">
+                <div class="status-indicator closed"></div>
+                <div class="status-info">
+                    <h3>Kasa Kapalı</h3>
+                    <p>Kasayı açmak için aşağıdaki butonu kullanın</p>
+                </div>
+            </div>
+        `;
+        openCashBtn.style.display = 'block';
+        closeCashBtn.style.display = 'none';
+    }
+}
+
+// Kasa açma modalını aç
+function openCashRegisterModal() {
+    document.getElementById('openingBalance').value = '';
+    openModal('openCashModal');
+}
+
+// Kasa açma işlemi
+async function confirmOpenCash() {
+    const openingBalance = parseFloat(document.getElementById('openingBalance').value) || 0;
+    
+    if (openingBalance < 0) {
+        showStatus('Geçerli bir açılış bakiyesi giriniz!', 'error');
+        return;
+    }
+    
+    try {
+        cashRegister = {
+            id: cashRegister.id || 1,
+            isOpen: true,
+            openingBalance: openingBalance,
+            currentBalance: openingBalance,
+            cashSales: 0,
+            cardSales: 0,
+            updatedAt: new Date().toISOString()
+        };
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
+        closeModal('openCashModal');
+        loadCashStatus();
+        showStatus('Kasa başarıyla açıldı!', 'success');
+        
+    } catch (error) {
+        console.error('Kasa açma hatası:', error);
+        showStatus('Kasa açılırken hata oluştu!', 'error');
+    }
+}
+
+// Kasa kapatma modalını aç
+function closeCashRegisterModal() {
+    const expectedBalance = cashRegister.openingBalance + cashRegister.cashSales;
+    const actualBalance = parseFloat(prompt(`Gerçek kasa bakiyesini giriniz (Beklenen: ${expectedBalance.toFixed(2)} TL):`)) || 0;
+    
+    if (actualBalance < 0) {
+        showStatus('Geçerli bir bakiye giriniz!', 'error');
+        return;
+    }
+    
+    const difference = actualBalance - expectedBalance;
+    
+    document.getElementById('closingSummary').innerHTML = `
+        <div class="closing-details">
+            <p><strong>Açılış Bakiyesi:</strong> ${cashRegister.openingBalance.toFixed(2)} TL</p>
+            <p><strong>Nakit Satış:</strong> ${cashRegister.cashSales.toFixed(2)} TL</p>
+            <p><strong>Beklenen Bakiye:</strong> ${expectedBalance.toFixed(2)} TL</p>
+            <p><strong>Gerçek Bakiye:</strong> ${actualBalance.toFixed(2)} TL</p>
+            <p class="${difference !== 0 ? 'difference-warning' : 'difference-ok'}">
+                <strong>Fark:</strong> ${difference.toFixed(2)} TL
+            </p>
+        </div>
+    `;
+    
+    document.getElementById('closeCashModal').setAttribute('data-actual-balance', actualBalance);
+    openModal('closeCashModal');
+}
+
+// Kasa kapatma işlemi
+async function confirmCloseCash() {
+    const actualBalance = parseFloat(document.getElementById('closeCashModal').getAttribute('data-actual-balance')) || 0;
+    
+    try {
+        // Kasa kapanış kaydı oluştur
+        const closingRecord = {
+            openingBalance: cashRegister.openingBalance,
+            cashSales: cashRegister.cashSales,
+            cardSales: cashRegister.cardSales,
+            expectedBalance: cashRegister.openingBalance + cashRegister.cashSales,
+            actualBalance: actualBalance,
+            difference: actualBalance - (cashRegister.openingBalance + cashRegister.cashSales),
+            closedAt: new Date().toISOString(),
+            closedBy: currentUser.username
+        };
+        
+        // Kasayı kapat
+        cashRegister.isOpen = false;
+        cashRegister.currentBalance = 0;
+        
+        // SUPABASE'e kaydet
+        await saveToSupabase();
+        
+        closeModal('closeCashModal');
+        loadCashStatus();
+        showStatus('Kasa başarıyla kapatıldı!', 'success');
+        
+    } catch (error) {
+        console.error('Kasa kapatma hatası:', error);
+        showStatus('Kasa kapatılırken hata oluştu!', 'error');
+    }
+}
+
+/* ======================================================
+   YÖNETİM FONKSİYONLARI
+   ====================================================== */
+
+// Yönetim verilerini yükle
+function loadAdminData() {
+    loadUserManagement();
+    loadSystemSettings();
+    loadDataManagement();
+}
+
+// Kullanıcı yönetimini yükle
+function loadUserManagement() {
+    const userList = document.getElementById('userList');
+    if (!userList) return;
+    
+    // Demo kullanıcılar
+    const demoUsers = [
+        { username: 'admin', role: 'admin', fullName: 'Sistem Yöneticisi', lastLogin: new Date().toISOString() },
+        { username: 'kasiyer1', role: 'user', fullName: 'Ahmet Yılmaz', lastLogin: new Date(Date.now() - 86400000).toISOString() },
+        { username: 'kasiyer2', role: 'user', fullName: 'Ayşe Demir', lastLogin: new Date(Date.now() - 172800000).toISOString() }
+    ];
+    
+    let usersHTML = '';
+    demoUsers.forEach(user => {
+        usersHTML += `
+            <div class="user-card">
+                <div class="user-info">
+                    <h4>${user.fullName}</h4>
+                    <p class="user-username">@${user.username}</p>
+                    <div class="user-details">
+                        <span class="user-role ${user.role}">${getRoleText(user.role)}</span>
+                        <span class="user-lastlogin">Son giriş: ${new Date(user.lastLogin).toLocaleString('tr-TR')}</span>
+                    </div>
+                </div>
+                <div class="user-actions">
+                    <button class="btn-small" onclick="editUser('${user.username}')">
+                        <i class="fas fa-edit"></i> Düzenle
+                    </button>
+                    ${user.username !== 'admin' ? `
+                        <button class="btn-small btn-danger" onclick="deleteUser('${user.username}')">
+                            <i class="fas fa-trash"></i> Sil
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    userList.innerHTML = usersHTML;
+}
+
+// Sistem ayarlarını yükle
+function loadSystemSettings() {
+    // Sistem ayarları burada yüklenir
+    console.log('Sistem ayarları yükleniyor...');
+}
+
+// Veri yönetimini yükle
+function loadDataManagement() {
+    // Veri yönetimi burada yüklenir
+    console.log('Veri yönetimi yükleniyor...');
+}
+
+// Admin sekmesini aç
+function openAdminTab(tabName) {
+    document.querySelectorAll('.admin-tab-content').forEach(tab => {
         tab.classList.remove('active');
     });
     
-    const activeBtn = document.querySelector(`[data-admin-tab="${tabName}"]`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
-    }
+    document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
     
     const activeTab = document.getElementById(`admin-${tabName}`);
     if (activeTab) {
         activeTab.classList.add('active');
+    }
+    
+    const activeBtn = document.querySelector(`[data-admin-tab="${tabName}"]`);
+    if (activeBtn) {
+        activeBtn.classList.add('active');
     }
 }
 
@@ -2927,108 +2264,299 @@ function openAdminTab(tabName) {
 function getRoleText(role) {
     const roles = {
         'admin': 'Yönetici',
-        'user': 'Personel',
-        'cashier': 'Kasiyer'
+        'user': 'Kasiyer',
+        'manager': 'Yönetici'
     };
-    return roles[role] || 'Kullanıcı';
+    return roles[role] || role;
 }
 
-// Status mesajı göster
+// Modal açma
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.style.display = 'flex';
+        setTimeout(() => {
+            modal.classList.add('show');
+        }, 10);
+    }
+}
+
+// Modal kapama
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.style.display = 'none';
+        }, 300);
+    }
+}
+
+// Durum mesajı göster
 function showStatus(message, type = 'info') {
-    const statusElement = document.getElementById('statusMessage');
-    if (!statusElement) return;
-    statusElement.textContent = message;
-    statusElement.className = `status-message ${type}`;
-    statusElement.style.display = 'block';
+    const status = document.getElementById('statusMessage');
+    if (!status) return;
+    
+    status.textContent = message;
+    status.className = `status-message ${type}`;
+    status.style.display = 'block';
     
     setTimeout(() => {
-        statusElement.style.display = 'none';
+        status.style.display = 'none';
     }, 3000);
 }
 
+// Ürünleri filtrele
+function filterProducts() {
+    const searchTerm = document.getElementById('productSearch').value.toLowerCase();
+    const productGrid = document.getElementById('productGrid');
+    
+    if (!productGrid) return;
+    
+    const filteredProducts = products.filter(product => 
+        product.name.toLowerCase().includes(searchTerm) || 
+        product.barcode.includes(searchTerm)
+    );
+    
+    if (filteredProducts.length === 0) {
+        productGrid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-search"></i>
+                <p>"${searchTerm}" ile eşleşen ürün bulunamadı</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let gridHTML = '';
+    filteredProducts.forEach(product => {
+        if (product.stock > 0) {
+            gridHTML += `
+                <div class="product-grid-item" onclick="addToCart('${product.barcode}')">
+                    <div class="grid-product-info">
+                        <h4>${product.name}</h4>
+                        <p class="grid-product-price">${product.price.toFixed(2)} TL</p>
+                        <p class="grid-product-stock">Stok: ${product.stock}</p>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    productGrid.innerHTML = gridHTML;
+}
+
 /* ======================================================
-   REAL-TIME BÖLÜMÜ
+   REAL-TIME SUPABASE LISTENERS
    ====================================================== */
 
+// Real-time listener'ları kur
 function setupRealtimeListeners() {
-    try {
-        console.log("🔄 Supabase real-time dinleyiciler başlatılıyor...");
-        const tables = ['products', 'sales', 'cash_register'];
-
-        if (realtimeChannels.length > 0) {
-            realtimeChannels.forEach(ch => {
-                try {
-                    ch.unsubscribe && ch.unsubscribe();
-                } catch (e) {}
-                try {
-                    supabase.removeChannel && supabase.removeChannel(ch);
-                } catch (e) {}
-            });
-            realtimeChannels = [];
-        }
-
-        tables.forEach(table => {
-            const channel = supabase
-                .channel(`realtime:${table}`)
-                .on(
-                    'postgres_changes',
-                    { event: '*', schema: 'public', table: table },
-                    (payload) => {
-                        console.log(`📡 ${table} tablosunda değişiklik algılandı:`, payload.eventType, payload);
-
-                        if (realtimeDebounceTimer) {
-                            clearTimeout(realtimeDebounceTimer);
-                        }
-                        realtimeDebounceTimer = setTimeout(async () => {
-                            console.log("🔁 Supabase verileri yeniden yükleniyor (realtime tetikleme)...");
-                            await loadFromSupabase();
-                            refreshDashboard();
-                        }, 2000);
-                    }
-                )
-                .subscribe((status) => {
-                    console.log(`✅ Real-time abonelik durumu (${table}):`, status);
-                });
-
-            realtimeChannels.push(channel);
-        });
-    } catch (err) {
-        console.error('Real-time başlatılırken hata:', err);
-    }
+    console.log('Real-time listenerlar kuruluyor...');
+    
+    // Products real-time listener
+    const productsChannel = supabase
+        .channel('products-changes')
+        .on('postgres_changes', 
+            { event: '*', schema: 'public', table: 'products' },
+            handleProductsChange
+        )
+        .subscribe();
+    
+    realtimeChannels.push(productsChannel);
+    
+    // Sales real-time listener
+    const salesChannel = supabase
+        .channel('sales-changes')
+        .on('postgres_changes', 
+            { event: '*', schema: 'public', table: 'sales' },
+            handleSalesChange
+        )
+        .subscribe();
+    
+    realtimeChannels.push(salesChannel);
+    
+    // Cash register real-time listener
+    const cashChannel = supabase
+        .channel('cash-register-changes')
+        .on('postgres_changes', 
+            { event: '*', schema: 'public', table: 'cash_register' },
+            handleCashRegisterChange
+        )
+        .subscribe();
+    
+    realtimeChannels.push(cashChannel);
+    
+    console.log('Real-time listenerlar başarıyla kuruldu');
 }
 
+// Real-time listener'ları kaldır
 function teardownRealtimeListeners() {
-    try {
-        if (realtimeChannels && realtimeChannels.length > 0) {
-            realtimeChannels.forEach(ch => {
-                try {
-                    ch.unsubscribe && ch.unsubscribe();
-                } catch (err) {}
-                try {
-                    supabase.removeChannel && supabase.removeChannel(ch);
-                } catch (err) {}
-            });
-            realtimeChannels = [];
-            console.log('🔕 Real-time dinleyiciler sonlandırıldı.');
-        }
-        if (realtimeDebounceTimer) {
-            clearTimeout(realtimeDebounceTimer);
-            realtimeDebounceTimer = null;
-        }
-    } catch (err) {
-        console.error('Real-time kapatılırken hata:', err);
-    }
+    console.log('Real-time listenerlar kaldırılıyor...');
+    
+    realtimeChannels.forEach(channel => {
+        supabase.removeChannel(channel);
+    });
+    
+    realtimeChannels = [];
+    console.log('Real-time listenerlar başarıyla kaldırıldı');
 }
 
-// Sayfa kapatılırken temizlik
-window.addEventListener('beforeunload', function() {
-    saveToLocalStorage();
-    stopCamera();
-    teardownRealtimeListeners();
+// Products değişiklik handler'ı
+function handleProductsChange(payload) {
+    console.log('Products real-time değişiklik:', payload);
+    
+    // Debounce mekanizması
+    clearTimeout(realtimeDebounceTimer);
+    realtimeDebounceTimer = setTimeout(() => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const changedProduct = mapDBProductToJS(payload.new);
+            const existingIndex = products.findIndex(p => p.barcode === changedProduct.barcode);
+            
+            if (existingIndex !== -1) {
+                products[existingIndex] = changedProduct;
+            } else {
+                products.push(changedProduct);
+            }
+        } else if (payload.eventType === 'DELETE') {
+            products = products.filter(p => p.barcode !== payload.old.barcode);
+        }
+        
+        // UI'ı güncelle
+        refreshAffectedUI();
+        
+    }, 100);
+}
+
+// Sales değişiklik handler'ı
+function handleSalesChange(payload) {
+    console.log('Sales real-time değişiklik:', payload);
+    
+    clearTimeout(realtimeDebounceTimer);
+    realtimeDebounceTimer = setTimeout(() => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const changedSale = mapDBSaleToJS(payload.new);
+            const existingIndex = salesHistory.findIndex(s => s.id === changedSale.id);
+            
+            if (existingIndex !== -1) {
+                salesHistory[existingIndex] = changedSale;
+            } else {
+                salesHistory.push(changedSale);
+            }
+        } else if (payload.eventType === 'DELETE') {
+            salesHistory = salesHistory.filter(s => s.id !== payload.old.id);
+        }
+        
+        // UI'ı güncelle
+        refreshAffectedUI();
+        
+    }, 100);
+}
+
+// Cash register değişiklik handler'ı
+function handleCashRegisterChange(payload) {
+    console.log('Cash register real-time değişiklik:', payload);
+    
+    clearTimeout(realtimeDebounceTimer);
+    realtimeDebounceTimer = setTimeout(() => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            cashRegister = mapDBCashRegisterToJS(payload.new);
+        }
+        
+        // UI'ı güncelle
+        refreshAffectedUI();
+        
+    }, 100);
+}
+
+// Etkilenen UI bileşenlerini yenile
+function refreshAffectedUI() {
+    const activeTab = document.querySelector('.tab-content.active');
+    if (!activeTab) return;
+    
+    const activeTabId = activeTab.id;
+    
+    switch (activeTabId) {
+        case 'dashboard':
+            refreshDashboard();
+            break;
+        case 'products':
+            loadProducts();
+            break;
+        case 'inventory':
+            loadInventory();
+            break;
+        case 'sales':
+            loadProductGrid();
+            break;
+        case 'reports':
+            loadReports('today');
+            break;
+        case 'cash':
+            loadCashStatus();
+            break;
+    }
+    
+    console.log('UI real-time değişikliklerle güncellendi');
+}
+
+/* ======================================================
+   SAYFA YENİLEME/KAPATMA KONTROLLERİ
+   ====================================================== */
+
+// Sayfa kapanırken veya yenilenirken verileri kaydet
+window.addEventListener('beforeunload', function(e) {
+    if (appInitialized) {
+        // Sayfa kapanırken/kaydedilirken verileri kaydet
+        const saveData = async () => {
+            try {
+                await saveToSupabase();
+                console.log('Sayfa kapanmadan önce veriler kaydedildi');
+            } catch (error) {
+                console.error('Sayfa kapanırken kayıt hatası:', error);
+            }
+        };
+        
+        // Async işlemi beklemek için event'i önle
+        e.preventDefault();
+        e.returnValue = '';
+        
+        // Kaydetme işlemini başlat
+        saveData();
+    }
+});
+
+// Online/offline durum takibi
+window.addEventListener('online', function() {
+    showStatus('İnternet bağlantısı sağlandı', 'success');
+    // Bağlantı sağlandığında verileri senkronize et
+    if (appInitialized) {
+        setTimeout(async () => {
+            try {
+                await saveToSupabase();
+                console.log('Online olduktan sonra veriler senkronize edildi');
+            } catch (error) {
+                console.error('Online senkronizasyon hatası:', error);
+            }
+        }, 1000);
+    }
+});
+
+window.addEventListener('offline', function() {
+    showStatus('İnternet bağlantısı kesildi - Çevrimdışı mod', 'warning');
 });
 
 // Hata yönetimi
 window.addEventListener('error', function(e) {
-    console.error('Uygulama hatası:', e.error);
-    showStatus('Bir hata oluştu!', 'error');
+    console.error('Global hata:', e.error);
+    showStatus('Bir hata oluştu, sayfayı yenilemeyi deneyin', 'error');
 });
+
+// Promise rejection handler
+window.addEventListener('unhandledrejection', function(e) {
+    console.error('İşlenmemiş promise hatası:', e.reason);
+    showStatus('Beklenmeyen bir hata oluştu', 'error');
+    e.preventDefault();
+});
+
+console.log('Tekel POS uygulaması yüklendi ve hazır!');
