@@ -334,7 +334,7 @@ def ensure_db_initialized():
         if isinstance(users, list) and len(users) == 0:
             try:
                 default_users = [
-                    {"username": "admin", "password": hash_password("admin123"), "full_name": "Sistem Yöneticisi", "role": "admin", "created_at": now_iso()},
+                    {"username": "admin", "password": hash_password("admin123321"), "full_name": "Sistem Yöneticisi", "role": "admin", "created_at": now_iso()},
                     {"username": "kasiyer", "password": hash_password("kasiyer123"), "full_name": "Kasiyer Kullanıcı", "role": "cashier", "created_at": now_iso()},
                     {"username": "personel", "password": hash_password("personel123"), "full_name": "Personel Kullanıcı", "role": "user", "created_at": now_iso()}
                 ]
@@ -478,7 +478,7 @@ def login():
     password = data.get("password")
     if not username or not password:
         # Provide offline login for default admin to keep frontend usable
-        if username == "admin" and password == "admin123":
+        if username == "admin" and password == "admin123321":
             user = {"id": 1, "username": "admin", "full_name": "Sistem Yöneticisi", "role": "admin"}
             return jsonify({"status": "success", "user": user, "token": str(user["id"])})
         return jsonify({"status": "success", "message": "Eksik kullanıcı veya şifre (allowed guest)", "user": {"id": 1, "username": "guest", "full_name": "Guest", "role": "user"}, "token": "1"})
@@ -495,7 +495,7 @@ def login():
                 pass
             return jsonify({"status": "success", "user": {"id": user.get("id"), "username": user.get("username"), "full_name": user.get("full_name"), "role": user.get("role")}, "token": str(user.get("id"))})
         # fallback: if DB has issue, allow default admin credentials
-        if username == "admin" and password == "admin123":
+        if username == "admin" and password == "admin123321":
             user = {"id": 1, "username": "admin", "full_name": "Sistem Yöneticisi", "role": "admin"}
             return jsonify({"status": "success", "user": user, "token": str(user["id"])})
         # otherwise return success with guest to avoid errors in frontend
